@@ -1,0 +1,30 @@
+{
+  "name": "aide",
+  "version": "0.1.0",
+  "description": "Agentic Integrated Development Engine",
+  "private": false,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "aide": "./bin/aide.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "smoke:dsh": "node scripts/dsh-smoke.mjs",
+    "smoke:platform": "node scripts/platform-smoke.mjs",
+    "smoke:intake": "node scripts/intake-smoke.mjs",
+    "smoke:codex-context": "node scripts/codex-advanced-smoke.mjs context",
+    "smoke:codex-plan": "node scripts/codex-advanced-smoke.mjs plan",
+    "smoke:codex-decomposition": "node scripts/codex-advanced-smoke.mjs decomposition",
+    "smoke:codex-semantic-review": "node scripts/codex-advanced-smoke.mjs semantic-review",
+    "smoke:codex-reattach": "node scripts/codex-advanced-smoke.mjs reattach",
+    "smoke:crossfire": "node scripts/codex-advanced-smoke.mjs crossfire",
+    "replay:routing": "node scripts/routing-replay.mjs",
+    "service": "node scripts/aide-service.mjs",
+    "start": "node bin/aide.mjs",
+    "doctor": "node bin/aide.mjs doctor",
+    "release:build": "node scripts/build-release.mjs"
+  }
+}

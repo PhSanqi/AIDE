@@ -1,0 +1,6 @@
+#!/usr/bin/env sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+NODE="$ROOT/runtime/node/bin/node"
+[ -x "$NODE" ] || NODE=node
+exec "$NODE" "$ROOT/bin/aide.mjs" "$@"

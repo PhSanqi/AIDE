@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>AIDE</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-row">
+        <div class="brand-mark">A</div>
+        <div>
+          <strong>AIDE</strong>
+          <small id="healthText">Connecting…</small>
+        </div>
+      </div>
+      <button class="primary full" id="newConversationButton">+ New conversation</button>
+      <nav class="nav-tabs" aria-label="Primary navigation">
+        <button class="nav-tab active" data-view="conversations">Conversations</button>
+        <button class="nav-tab" data-view="tasks">Tasks</button>
+        <button class="nav-tab" data-view="models">Models & Accounts</button>
+        <button class="nav-tab" data-view="harnesses">Harnesses & Modes</button>
+        <button class="nav-tab" data-view="routing">Routing</button>
+        <button class="nav-tab" data-view="settings">Settings</button>
+      </nav>
+      <div class="section-label">Recent</div>
+      <div id="conversationList" class="conversation-list"></div>
+    </aside>
+
+    <main class="main">
+      <section id="conversationView" class="view active">
+        <header class="topbar">
+          <div>
+            <h1 id="conversationTitle">New conversation</h1>
+            <p id="conversationMeta">AIDE orchestration workspace</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost" id="renameConversationButton">Rename</button>
+            <button class="ghost" id="archiveConversationButton">Archive</button>
+            <button class="ghost" id="refreshButton">Refresh</button>
+          </div>
+        </header>
+
+        <div class="workspace-grid">
+          <section class="conversation-panel">
+            <div id="timeline" class="timeline empty-state">
+              <div class="empty-card">
+                <span class="eyebrow">AIDE</span>
+                <h2>Start with the goal.</h2>
+                <p>AIDE will create a durable Task, choose a qualified Harness, execute, verify, and keep the result in this conversation.</p>
+              </div>
+            </div>
+
+            <form id="composer" class="composer">
+              <textarea id="messageInput" rows="3" placeholder="Ask AIDE to work on this project…" required></textarea>
+              <div class="composer-toolbar">
+                <label>Strategy
+                  <select id="strategySelect">
+                    <option value="">Auto</option>
+                    <option value="economy">Economy</option>
+                    <option value="capability">Capability</option>
+                  </select>
+                </label>
+                <label>Target
+                  <select id="targetSelect"><option value="">Auto</option></select>
+                </label>
+                <label>Model
+                  <select id="modelSelect" disabled><option value="">Profile default</option></select>
+                </label>
+                <label>Effort
+                  <select id="effortSelect" disabled><option value="">Model default</option></select>
+                </label>
+                <label>AIDE mode
+                  <select id="modeSelect">
+                    <option value="direct">Direct</option>
+                    <option value="decompose">Decompose</option>
+                    <option value="crossfire">Crossfire</option>
+                  </select>
+                </label>
+                <button class="primary send" type="submit" id="sendButton">Send</button>
+              </div>
+              <div id="selectionHint" class="selection-hint"></div>
+            </form>
+          </section>
+
+          <aside class="inspector">
+            <div class="inspector-header">
+              <span class="eyebrow">Current execution</span>
+              <span id="taskStateBadge" class="badge neutral">Idle</span>
+            </div>
+            <div id="inspectorBody" class="inspector-body muted">No Task selected.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="tasksView" class="view">
+        <header class="topbar"><div><h1>Tasks</h1><p>Active, recent, and recovery-required work.</p></div></header>
+        <div class="page-card"><div id="taskTable"></div></div>
+      </section>
+
+      <section id="modelsView" class="view">
+        <header class="topbar"><div><h1>Models & Accounts</h1><p>Live configured targets. Secrets are never returned to this page.</p></div></header>
+        <div id="modelCards" class="card-grid"></div>
+        <div class="page-card note-card">
+          <h3>Account management boundary</h3>
+          <p>Codex uses its native app-server account API. API keys are write-only and are never returned by AIDE. DSH remains Native-managed until its adapter exposes an equivalent verified provider-auth seam.</p>
+        </div>
+      </section>
+
+      <section id="routingView" class="view">
+        <header class="topbar"><div><h1>Routing</h1><p>Actual routing history and observe-only shadow advice.</p></div></header>
+        <div class="page-card"><div id="routingTable"></div></div>
+      </section>
+
+      <section id="harnessesView" class="view">
+        <header class="topbar"><div><h1>Harnesses & Modes</h1><p>Native capabilities and configured execution profiles.</p></div></header>
+        <div id="harnessCards" class="card-grid"></div>
+      </section>
+
+      <section id="settingsView" class="view">
+        <header class="topbar"><div><h1>Settings</h1><p>Current local service defaults and product boundaries.</p></div></header>
+        <div class="page-card" id="settingsCard"></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
