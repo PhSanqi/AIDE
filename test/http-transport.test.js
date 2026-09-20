@@ -23,6 +23,7 @@ function runtimeFixture() {
       tasks: async (options) => { calls.push(["tasks", options]); return [{ task: { task_id: "task-list" }, attempts: [] }]; },
       recoveries: async () => [{ task: { task_id: "task-old" } }],
       routingHistory: async (options) => { calls.push(["routingHistory", options]); return [{ attempt_id: "attempt-history" }]; },
+      preflight: async (message, options) => { calls.push(["preflight", message, options]); return { dry_run: true, objective: message, assignment: { id: "codex-economy" }, durable_state_created: false, native_run_started: false }; },
       enqueue: async (message, options, request) => { calls.push(["enqueue", message, options, request]); return { task_id: "task-1", attempt_id: "attempt-1", state: "running" }; },
       status: async (taskId) => ({ task: { task_id: taskId }, runtime: { attached: true } }),
       steerTask: async (taskId, message) => { calls.push(["steer", taskId, message]); return { accepted: true }; },
@@ -55,11 +56,20 @@ test("AideHttpTransport exposes one thin asynchronous Task control API", async (
   assert.equal((await (await fetch(`${base}/v1/recoveries`)).json()).recoveries[0].task.task_id, "task-old");
   assert.equal((await (await fetch(`${base}/v1/routing-history?limit=5`)).json()).history[0].attempt_id, "attempt-history");
 
+  const preflightResponse = await fetch(`${base}/v1/preflight`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "check before work", strategy: "economy", workspace: "/tmp/project" }),
+  });
+  assert.equal(preflightResponse.status, 200);
+  assert.equal((await preflightResponse.json()).dry_run, true);
+
   await fetch(`${base}/v1/tasks/task-1/steer`, { method: "POST", body: JSON.stringify({ message: "focus" }) });
   await fetch(`${base}/v1/tasks/task-1/cancel`, { method: "POST" });
   await fetch(`${base}/v1/tasks/task-1/recover`, { method: "POST", body: JSON.stringify({ action: "abandon", quiescent: true }) });
   await fetch(`${base}/v1/interactions/interaction-1/respond`, { method: "POST", body: JSON.stringify({ response: "allow" }) });
-  assert.deepEqual(fixture.calls.map(([name]) => name), ["enqueue", "tasks", "routingHistory", "steer", "cancel", "recover", "respond"]);
+  assert.deepEqual(fixture.calls.map(([name]) => name), ["enqueue", "tasks", "routingHistory", "preflight", "steer", "cancel", "recover", "respond"]);
+  assert.deepEqual(fixture.calls.find(([name]) => name === "preflight").slice(1), ["check before work", { workspace: "/tmp/project", requirements: { execution_strategy: "economy" } }]);
   await transport.stop();
 });
 
@@ -72,9 +82,16 @@ test("AideHttpTransport serves the local management UI and Conversation Task ent
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type"), /text\/html/);
-  assert.match(await page.text(), /AIDE Management UI|New conversation|Models & Accounts/);
-  assert.match(await (await fetch(`${base}/app.js`)).text(), /createConversation/);
-  assert.match(await (await fetch(`${base}/styles.css`)).text(), /workspace-grid/);
+  assert.match(await page.text(), /Overview|New conversation|Models & Accounts/);
+  assert.match(await (await fetch(`${base}/`)).text(), /id="conversationsView"/);
+  const app = await (await fetch(`${base}/app.js`)).text();
+  assert.match(app, /createConversation/);
+  assert.match(app, /loadOverview/);
+  assert.match(app, /timelineFollow/);
+  const styles = await (await fetch(`${base}/styles.css`)).text();
+  assert.match(styles, /workspace-grid/);
+  assert.match(styles, /@media \(max-width: 640px\)/);
+  assert.doesNotMatch(styles, /body\s*\{[^}]*min-width\s*:/);
 
   const created = await (await fetch(`${base}/v1/conversations`, {
     method: "POST",
@@ -193,6 +210,7 @@ test("AideHttpTransport serves MCP 2026-07-28 tools on the same runtime", async 
   assert.equal(list.result.resultType, "complete");
   const submitTool = list.result.tools.find((tool) => tool.name === "aide_submit");
   assert.ok(submitTool);
+  assert.ok(list.result.tools.some((tool) => tool.name === "aide_preflight"));
   assert.deepEqual(submitTool.inputSchema.properties.decompose, { type: "boolean" });
   assert.deepEqual(submitTool.inputSchema.properties.constraints, { type: "array", maxItems: 32, items: { type: "string" } });
   assert.deepEqual(submitTool.inputSchema.properties.semantic_acceptance, { type: "array", maxItems: 16, items: { type: "string" } });
@@ -208,6 +226,10 @@ test("AideHttpTransport serves MCP 2026-07-28 tools on the same runtime", async 
   const mcpEnqueue = fixture.calls.find(([name, message]) => name === "enqueue" && message === "from mcp");
   assert.equal(mcpEnqueue[3].clientRequestId, "mcp-request-1");
   assert.deepEqual(mcpEnqueue[2].requirements, { execution_strategy: "capability", plan_consensus: "dual" });
+
+  const preflight = await (await request({ jsonrpc: "2.0", id: 30, method: "tools/call", params: { name: "aide_preflight", arguments: { message: "check from mcp", strategy: "economy", workspace: "/tmp/project" } } })).json();
+  assert.equal(preflight.result.structuredContent.dry_run, true);
+  assert.deepEqual(fixture.calls.find(([name, message]) => name === "preflight" && message === "check from mcp").slice(1), ["check from mcp", { requirements: { execution_strategy: "economy" }, workspace: "/tmp/project" }]);
 
   const history = await (await request({ jsonrpc: "2.0", id: 31, method: "tools/call", params: { name: "aide_routing_history", arguments: { limit: 7 } } })).json();
   assert.equal(history.result.structuredContent.history[0].attempt_id, "attempt-history");

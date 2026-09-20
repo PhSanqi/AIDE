@@ -13,6 +13,25 @@ const UI_ASSETS = new Map([
 
 const MCP_TOOLS = [
   {
+    name: "aide_preflight",
+    description: "Validate one AIDE Task request against the same Tutti/Broker routing and workspace-isolation gates as submission, without creating durable Work State, allocating a worktree, or starting a Native Harness.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        workspace: { type: "string" },
+        strategy: { type: "string", enum: ["economy", "capability"] },
+        crossfire: { type: "boolean" },
+        decompose: { type: "boolean" },
+        constraints: { type: "array", maxItems: 32, items: { type: "string" } },
+        semantic_acceptance: { type: "array", maxItems: 16, items: { type: "string" } },
+        options: { type: "object" },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "aide_submit",
     description: "Start one AIDE Task and return its durable task id immediately. strategy=economy prefers the configured low-consumption target; strategy=capability prefers the configured high-capability target. crossfire requests two independent capability planners; decompose requests one structured capability decomposition decision before execution; semantic_acceptance adds explicit semantic criteria reviewed only after mechanical acceptance passes. AIDE continues supervision independently of the MCP request.",
     inputSchema: {
@@ -322,6 +341,11 @@ export class AideHttpTransport {
         const limit = rawLimit === null ? 100 : Number(rawLimit);
         return writeJson(response, 200, { history: await this.runtime.routingHistory({ limit }) });
       }
+      if (method === "POST" && path === "/v1/preflight") {
+        const body = await jsonBody(request, this.bodyLimit);
+        const options = submitOptions(body.options, body.strategy, body.crossfire, body.decompose, body.constraints, body.semantic_acceptance);
+        return writeJson(response, 200, await this.runtime.preflight(requiredString(body.message, "message"), { ...options, ...(body.workspace === undefined ? {} : { workspace: body.workspace }) }));
+      }
       if (method === "POST" && path === "/v1/tasks") {
         const body = await jsonBody(request, this.bodyLimit);
         const clientRequestId = request.headers["idempotency-key"] ?? null;
@@ -437,6 +461,10 @@ export class AideHttpTransport {
 
   async #callMcpTool(name, args) {
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new TypeError("MCP tool arguments must be an object.");
+    if (name === "aide_preflight") {
+      const options = submitOptions(args.options, args.strategy, args.crossfire, args.decompose, args.constraints, args.semantic_acceptance);
+      return this.runtime.preflight(requiredString(args.message, "message"), { ...options, ...(args.workspace === undefined ? {} : { workspace: args.workspace }) });
+    }
     if (name === "aide_submit") {
       return this.runtime.enqueue(requiredString(args.message, "message"), submitOptions(args.options, args.strategy, args.crossfire, args.decompose, args.constraints, args.semantic_acceptance), { clientRequestId: args.client_request_id ?? null });
     }

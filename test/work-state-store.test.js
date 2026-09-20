@@ -15,9 +15,10 @@ async function storeFixture() {
 test("WorkStateStore persists Task, WorkPackage, and completed Attempt", async () => {
   const options = await storeFixture();
   const store = await WorkStateStore.open(options);
+  const workspace = join(tmpdir(), "work-1");
   const task = await store.createTask({ objective: "prove the slice", acceptance: { finalText: "ok" } });
   const workPackage = await store.createWorkPackage({ taskId: task.task_id, objective: "write smoke file", requirements: { capabilities: ["headless"] } });
-  const attempt = await store.createAttempt({ workPackageId: workPackage.work_package_id, assignment: { harness: "dsh" }, workspace: "/tmp/work-1" });
+  const attempt = await store.createAttempt({ workPackageId: workPackage.work_package_id, assignment: { harness: "dsh" }, workspace });
   await store.markAttemptRunning(attempt.attempt_id, { runId: "run-1" });
   await store.finishAttempt(attempt.attempt_id, {
     result: { status: "completed", session_id: "session-1", exit_code: 0 },
@@ -36,7 +37,7 @@ test("WorkStateStore persists Task, WorkPackage, and completed Attempt", async (
     attempt_id: "attempt-3",
     work_package_id: "wp-2",
     assignment: { harness: "dsh" },
-    workspace: "/tmp/work-1",
+    workspace,
     workspace_ref_id: null,
     status: "completed",
     run_id: "run-1",

@@ -25,8 +25,8 @@ function normalizeDshTurnEndReason(value) {
   return null;
 }
 
-function killOwnedProcess(child, signal, ownsProcessGroup, platform = process.platform) {
-  if (platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
+function killOwnedProcess(child, signal, ownsProcessGroup, ownsProcessTree, platform = process.platform) {
+  if (ownsProcessTree && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
   if (ownsProcessGroup && Number.isInteger(child.pid) && child.pid > 0) {
     try { process.kill(-child.pid, signal); return true; }
     catch (error) { if (error?.code !== "ESRCH") throw error; }
@@ -79,6 +79,7 @@ export class DshHeadlessAdapter {
     const args = ["--profile", "headless", "--json", ...(sessionId === undefined ? [] : ["--session-id", sessionId])];
     const platform = this.platform;
     const ownsProcessGroup = platform !== "win32" && this.spawn === spawnProcess;
+    const ownsProcessTree = platform === "win32" && this.spawn === spawnProcess;
     const launch = nativeCommandSpec(this.command, args, { platform: this.platform });
     const child = this.spawn(launch.command, launch.args, {
       cwd,
@@ -172,9 +173,9 @@ export class DshHeadlessAdapter {
       cancel() {
         if (child.exitCode !== null || child.signalCode !== null) return false;
         cancelRequested = true;
-        killOwnedProcess(child, "SIGTERM", ownsProcessGroup, platform);
+        killOwnedProcess(child, "SIGTERM", ownsProcessGroup, ownsProcessTree, platform);
         killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGKILL", ownsProcessGroup, platform);
+          if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGKILL", ownsProcessGroup, ownsProcessTree, platform);
         }, 2_000);
         killTimer.unref?.();
         return true;

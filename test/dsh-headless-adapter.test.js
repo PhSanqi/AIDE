@@ -24,7 +24,7 @@ test("parseDshEvent accepts a normal DSH event", () => {
 });
 
 test("DSH headless probe advertises only verified run-control capabilities", async () => {
-  const adapter = new DshHeadlessAdapter({ exec: async () => ({ stdout: "dsh test\n" }) });
+  const adapter = new DshHeadlessAdapter({ platform: "linux", exec: async () => ({ stdout: "dsh test\n" }) });
   const probe = await adapter.probe();
   assert.equal(probe.available, true);
   assert.deepEqual(probe.capabilities, ["headless", "json_events", "stream_events", "session_resume", "cancel"]);
@@ -51,6 +51,7 @@ test("DSH adapter uses headless JSON over stdin and normalizes the result", asyn
   let invocation;
   let task = "";
   const adapter = new DshHeadlessAdapter({
+    platform: "linux",
     command: "/test/dsh",
     spawn: fakeChildProcess(({ child, ...rest }) => {
       invocation = rest;
@@ -91,6 +92,7 @@ test("DSH adapter uses headless JSON over stdin and normalizes the result", asyn
 test("DSH adapter resumes an explicit session and treats non-zero exit as failure", async () => {
   let args;
   const adapter = new DshHeadlessAdapter({
+    platform: "linux",
     spawn: fakeChildProcess(({ child, args: actual }) => {
       args = actual;
       queueMicrotask(() => {

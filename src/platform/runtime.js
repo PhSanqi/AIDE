@@ -1,9 +1,13 @@
 import { execFile as execFileCallback, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { posix, win32 } from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
+
+function pathApi(platform) {
+  return platform === "win32" ? win32 : posix;
+}
 
 export function defaultCodexCommand({ platform = process.platform } = {}) {
   return platform === "win32" ? "codex.cmd" : "/usr/lib/chatgpt/resources/codex";
@@ -24,14 +28,15 @@ export function nativeCommandSpec(command, args = [], { platform = process.platf
 }
 
 export function defaultStateBase({ platform = process.platform, env = process.env, home = homedir() } = {}) {
+  const path = pathApi(platform);
   return platform === "win32"
-    ? join(env.LOCALAPPDATA || join(home, "AppData", "Local"), "AIDE", "state")
-    : join(home, ".local", "state", "aide");
+    ? path.join(env.LOCALAPPDATA || path.join(home, "AppData", "Local"), "AIDE", "state")
+    : path.join(home, ".local", "state", "aide");
 }
 
 export function defaultStateRoot(projectKey, options = {}) {
   if (typeof projectKey !== "string" || projectKey.length === 0) throw new TypeError("projectKey is required.");
-  return join(defaultStateBase(options), projectKey);
+  return pathApi(options.platform ?? process.platform).join(defaultStateBase(options), projectKey);
 }
 
 export async function localProcessTreeAlive(rootPid, { platform = process.platform, exec = execFile } = {}) {

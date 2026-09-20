@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultCodexCommand, defaultDshCommand, nativeCommandSpec } from "../src/platform/runtime.js";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const version = JSON.parse(await readFile(resolve(root, "package.json"), "utf8")).version;
 const [command = "start", ...args] = process.argv.slice(2);
 
 function run(command, args, options = {}) {
@@ -29,7 +30,7 @@ async function doctor() {
   };
   const ready = Object.values(checks).every(Boolean) && Object.values(harnesses).some(Boolean);
   console.log(JSON.stringify({
-    aide: "0.1.0",
+    aide: version,
     platform: process.platform,
     node: { version: process.version, executable: process.execPath },
     checks,

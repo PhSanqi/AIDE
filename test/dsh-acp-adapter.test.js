@@ -109,6 +109,7 @@ async function waitFor(predicate, timeoutMs = 1_000) {
 
 test("DshAcpAdapter probe advertises only verified ACP control capabilities", async () => {
   const adapter = new DshAcpAdapter({
+    platform: "linux",
     exec: async (_command, args) => args[0] === "--version"
       ? { stdout: "0.1.6-alpha.1\n" }
       : { stdout: "Serve automation clients over Agent Client Protocol stdio." },
@@ -125,7 +126,7 @@ test("DshAcpAdapter probe advertises only verified ACP control capabilities", as
 test("DshAcpAdapter maps one ACP prompt to AIDE result and proves no-tool side effects", async () => {
   const fake = fakeAcpProcess();
   const events = [];
-  const adapter = new DshAcpAdapter({ spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
+  const adapter = new DshAcpAdapter({ platform: "linux", spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
   const handle = adapter.start({ task: "finish", cwd: "/tmp/work", onEvent: (event) => events.push(event) });
   const result = await handle.done;
 
@@ -158,7 +159,7 @@ test("DshAcpAdapter uses the Windows cmd shim and persists a process-tree root",
 test("DshAcpAdapter exposes native permission option ids and resumes the same prompt", async () => {
   const fake = fakeAcpProcess({ permission: true, toolCall: true });
   const events = [];
-  const adapter = new DshAcpAdapter({ spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
+  const adapter = new DshAcpAdapter({ platform: "linux", spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
   const handle = adapter.start({ task: "run tool", cwd: "/tmp/work", onEvent: (event) => events.push(event) });
   const interaction = await waitFor(() => events.find((event) => event.type === "interaction_request"));
 
@@ -177,7 +178,7 @@ test("DshAcpAdapter exposes native permission option ids and resumes the same pr
 
 test("DshAcpAdapter resumes an opaque native session and uses native cancellation", async () => {
   const fake = fakeAcpProcess({ permission: true });
-  const adapter = new DshAcpAdapter({ spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
+  const adapter = new DshAcpAdapter({ platform: "linux", spawn: () => fake.child, exec: async () => ({ stdout: "dsh test" }) });
   const handle = adapter.start({ task: "continue", cwd: "/tmp/work", sessionId: "session-acp" });
   await waitFor(() => fake.messages.find((message) => message.method === "session/prompt"));
   assert.equal(handle.cancel(), true);
@@ -212,8 +213,8 @@ test("DshAcpAdapter approval contract reflects the configured DSH permission mod
   const exec = async (_command, args) => args[0] === "--version"
     ? { stdout: "0.1.6-alpha.1\n" }
     : { stdout: "Serve automation clients over Agent Client Protocol stdio." };
-  const workspace = await new DshAcpAdapter({ exec, permissionMode: "workspace-write" }).probe();
-  const unrestricted = await new DshAcpAdapter({ exec, permissionMode: "danger-full-access" }).probe();
+  const workspace = await new DshAcpAdapter({ platform: "linux", exec, permissionMode: "workspace-write" }).probe();
+  const unrestricted = await new DshAcpAdapter({ platform: "linux", exec, permissionMode: "danger-full-access" }).probe();
 
   assert.equal(workspace.approval_contract.interactive, true);
   assert.equal(workspace.approval_contract.behavior, "fail_closed");
@@ -227,6 +228,7 @@ test("DshAcpAdapter pins the child process to its configured permission mode", a
   const fake = fakeAcpProcess();
   let mode;
   const adapter = new DshAcpAdapter({
+    platform: "linux",
     permissionMode: "workspace-write",
     spawn: (_command, _args, options) => { mode = options.env.DSH_PERMISSION_MODE; return fake.child; },
     exec: async () => ({ stdout: "dsh test" }),

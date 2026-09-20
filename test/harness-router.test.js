@@ -63,6 +63,32 @@ test("HarnessRouter continue passes the existing session id", () => {
   assert.equal(seenSessionId, "session-existing");
 });
 
+test("HarnessRouter continuation inherits the Harness bound to the native session", () => {
+  const dsh = fakeAdapter();
+  const codex = fakeAdapter();
+  let codexStarts = 0;
+  const originalCodexStart = codex.start;
+  codex.start = (input) => { codexStarts += 1; return originalCodexStart(input); };
+  const router = new HarnessRouter({ dsh, codex });
+
+  router.start({ harness: "codex", task: "first", cwd: "/tmp/work", sessionId: "session-codex" });
+  router.continue({ sessionId: "session-codex", task: "follow up", cwd: "/tmp/work" });
+
+  assert.equal(codexStarts, 2);
+});
+
+test("HarnessRouter rejects continuation through a different Harness than the native session", () => {
+  const dsh = fakeAdapter();
+  const codex = fakeAdapter();
+  const router = new HarnessRouter({ dsh, codex });
+  router.start({ harness: "codex", task: "first", cwd: "/tmp/work", sessionId: "session-codex" });
+
+  assert.throws(
+    () => router.continue({ sessionId: "session-codex", harness: "dsh", task: "wrong route", cwd: "/tmp/work" }),
+    (error) => error.code === "HARNESS_SESSION_HARNESS_MISMATCH",
+  );
+});
+
 test("HarnessRouter passes scoped context through without interpreting it", () => {
   let seenContext;
   const dsh = fakeAdapter();

@@ -8,6 +8,10 @@ export class AideControl {
     return this.intake.runTask(message, options);
   }
 
+  preflight(message, options = {}) {
+    return this.intake.preflight(message, options);
+  }
+
   startTask(message, options = {}) {
     return this.intake.startRun(message, options);
   }

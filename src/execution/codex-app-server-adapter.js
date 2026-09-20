@@ -29,6 +29,7 @@ function createAppServerClient(command, spawn, { onNotification = () => {}, plat
   };
   child.once("error", fail);
   child.once("close", () => fail(Object.assign(new Error("Codex app-server closed."), { code: "CODEX_APP_SERVER_CLOSED" })));
+  child.stdin?.on("error", fail);
   child.stdout.setEncoding("utf8");
   child.stdout.on("data", (chunk) => {
     buffer += chunk;
@@ -60,7 +61,7 @@ function createAppServerClient(command, spawn, { onNotification = () => {}, plat
     request: async (method, params = {}) => { await ready; return rawRequest(method, params); },
     close: () => {
       if (child.exitCode !== null || child.signalCode !== null) return;
-      if (platform === "win32") terminateProcessTree(child.pid, { platform });
+      if (platform === "win32" && spawn === spawnProcess) terminateProcessTree(child.pid, { platform });
       else child.kill("SIGTERM");
     },
   };
@@ -131,8 +132,8 @@ function sanitizeRateLimits(value) {
   };
 }
 
-function killOwnedProcess(child, signal, ownsProcessGroup, platform = process.platform) {
-  if (platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
+function killOwnedProcess(child, signal, ownsProcessGroup, ownsProcessTree, platform = process.platform) {
+  if (ownsProcessTree && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
   if (ownsProcessGroup && Number.isInteger(child.pid) && child.pid > 0) {
     try { process.kill(-child.pid, signal); return true; }
     catch (error) { if (error?.code !== "ESRCH") throw error; }
@@ -140,7 +141,7 @@ function killOwnedProcess(child, signal, ownsProcessGroup, platform = process.pl
   return child.kill(signal);
 }
 
-async function queryCatalog(command, spawn, { timeoutMs = 3_000, cache = true, platform = process.platform } = {}) {
+async function queryCatalog(command, spawn, { timeoutMs = 10_000, cache = true, platform = process.platform } = {}) {
   const cacheKey = cache && spawn === spawnProcess ? command : null;
   const cached = cacheKey ? catalogCache.get(cacheKey) : null;
   if (cached && Date.now() - cached.createdAt < CATALOG_CACHE_MS) return cached.promise;
@@ -423,12 +424,39 @@ function fileChangePaths(item) {
     : [];
 }
 
+function commandActionTypes(item) {
+  return Array.isArray(item?.commandActions)
+    ? item.commandActions.map((action) => action?.type).filter((type) => typeof type === "string")
+    : [];
+}
+
+function simpleInspectionCommandClass(item) {
+  const actions = Array.isArray(item?.commandActions) ? item.commandActions : [];
+  if (actions.length > 0 && actions.every((action) => ["read", "listFiles", "search"].includes(action?.type))) return "none";
+  if (item?.status === "failed"
+    && item?.durationMs === 0
+    && typeof item?.aggregatedOutput === "string"
+    && item.aggregatedOutput.startsWith("bwrap: No permissions to create new namespace")) return "none";
+
+  const command = actions.length === 1 && actions[0]?.type === "unknown" ? actions[0].command : item?.command;
+  if (typeof command !== "string" || command.length === 0 || /[;|<>\`$()\r\n]/.test(command)) return "external_possible";
+  let classification = "none";
+  for (const segment of command.split(/\s*&&\s*/)) {
+    const value = segment.trim();
+    if (/^git\s+status(?:\s|$)/.test(value)) classification = "workspace_only";
+    else if (/^printf(?:\s|$)/.test(value) || /^od(?:\s|$)/.test(value) || /^sed\s+-n\s+l(?:\s|$)/.test(value)) continue;
+    else return "external_possible";
+  }
+  return classification;
+}
+
 function sideEffectClass(item, cwd) {
   if (item?.type === "fileChange") {
     const paths = fileChangePaths(item);
     return paths.length > 0 && paths.every((path) => withinWorkspace(cwd, path)) ? "workspace_only" : "external_possible";
   }
-  if (["commandExecution", "mcpToolCall", "imageGeneration"].includes(item?.type)) return "external_possible";
+  if (item?.type === "commandExecution") return simpleInspectionCommandClass(item);
+  if (["mcpToolCall", "imageGeneration"].includes(item?.type)) return "external_possible";
   if (["userMessage", "agentMessage", "functionCallOutput", "plan", "reasoning", "dynamicToolCall", "webSearch", "imageView", "sleep", "enteredReviewMode", "exitedReviewMode", "contextCompaction"].includes(item?.type)) return null;
   if (typeof item?.type === "string") return "external_possible";
   return null;
@@ -681,6 +709,7 @@ export class CodexAppServerAdapter {
     if (effectiveEffort !== null && (typeof effectiveEffort !== "string" || effectiveEffort.length === 0)) throw new TypeError("Codex run reasoningEffort must be a non-empty string or null.");
 
     const ownsProcessGroup = this.platform !== "win32" && this.spawn === spawnProcess;
+    const ownsProcessTree = this.platform === "win32" && this.spawn === spawnProcess;
     const launch = nativeCommandSpec(this.command, ["app-server", "--stdio"], { platform: this.platform });
     const child = this.spawn(launch.command, launch.args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: ownsProcessGroup, windowsHide: this.platform === "win32" });
     let stdoutBuffer = "";
@@ -699,6 +728,7 @@ export class CodexAppServerAdapter {
     let cancelRequested = false;
     let shutdownRequested = false;
     let sideEffectObserved = false;
+    const pendingCommandItems = new Set();
     let killTimer;
     const pendingClientRequests = new Map();
     const nativeRequests = new Map();
@@ -706,9 +736,9 @@ export class CodexAppServerAdapter {
     const stopChild = () => {
       if (shutdownRequested || child.exitCode !== null || child.signalCode !== null) return;
       shutdownRequested = true;
-      killOwnedProcess(child, "SIGTERM", ownsProcessGroup, this.platform);
+      killOwnedProcess(child, "SIGTERM", ownsProcessGroup, ownsProcessTree, this.platform);
       killTimer = setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGKILL", ownsProcessGroup, this.platform);
+        if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGKILL", ownsProcessGroup, ownsProcessTree, this.platform);
       }, 2_000);
       killTimer.unref?.();
     };
@@ -774,6 +804,10 @@ export class CodexAppServerAdapter {
             onEvent({ type: "context_health", event: "compaction", source: "codex:item/contextCompaction", turnId: compactedTurnId });
           }
         }
+        if (params.item?.type === "commandExecution") {
+          if (typeof params.item?.id === "string" && params.item.id.length > 0) pendingCommandItems.add(params.item.id);
+          return;
+        }
         const classification = sideEffectClass(params.item, cwd);
         if (classification) {
           sideEffectObserved = true;
@@ -787,7 +821,29 @@ export class CodexAppServerAdapter {
         }
         return;
       }
+      if (method === "item/completed" && params.item?.type === "commandExecution") {
+        if (typeof params.item?.id === "string") pendingCommandItems.delete(params.item.id);
+        const classification = sideEffectClass(params.item, cwd);
+        sideEffectObserved = true;
+        const actionTypes = commandActionTypes(params.item);
+        onEvent({
+          type: "side_effect",
+          classification,
+          source: "codex:item/commandExecution",
+          detail: { item_id: params.item?.id ?? null, ...(actionTypes.length > 0 ? { command_actions: actionTypes } : {}) },
+        });
+        return;
+      }
       if (method === "turn/completed") {
+        if (pendingCommandItems.size > 0) {
+          sideEffectObserved = true;
+          onEvent({
+            type: "side_effect",
+            classification: "external_possible",
+            source: "codex:item/commandExecution:missing_completion",
+            detail: { item_ids: [...pendingCommandItems] },
+          });
+        }
         if (!sideEffectObserved) onEvent({ type: "side_effect", classification: "none", source: "codex:no-side-effect-items" });
         const notifiedTurn = params.turn ?? null;
         terminalTurn = notifiedTurn;

@@ -34,7 +34,7 @@ try {
   await writeFile(join(isolated.path, "PLATFORM.txt"), `${process.platform}\n`);
   const landed = await workspaces.land({ path: isolated.path, projectRoot: project });
   assert.ok(landed.patch_bytes > 0);
-  assert.equal(await readFile(join(project, "PLATFORM.txt"), "utf8"), `${process.platform}\n`);
+  assert.equal((await readFile(join(project, "PLATFORM.txt"), "utf8")).replace(/\r\n/g, "\n"), `${process.platform}\n`);
   await workspaces.discard({ path: isolated.path, projectRoot: project });
 
   const codex = new CodexAppServerAdapter();

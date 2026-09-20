@@ -12,24 +12,30 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const stateDirectory = await mkdtemp(join(tmpdir(), "aide-intake-state-"));
 const store = await WorkStateStore.open({ filePath: join(stateDirectory, "work-state.json") });
 const context = await LocalContextFabric.open({ root, store });
-const intake = new TuttiIntake({ store, router: new HarnessRouter(), context });
+const router = new HarnessRouter();
+const intake = new TuttiIntake({ store, router, context });
+const probes = await router.probe();
 
-const headless = await intake.submit("Inspect WorkStateStore before making a bounded change.", {
-  requirements: { capabilities: ["headless", "json_events"] },
-});
-assert.equal(headless.assignment.id, "dsh");
+const headless = probes.dsh?.available
+  ? await intake.submit("Inspect WorkStateStore before making a bounded change.", {
+      requirements: { capabilities: ["headless", "json_events"] },
+    })
+  : null;
+if (headless) assert.equal(headless.assignment.id, "dsh");
 
-const acp = await intake.submit("Verify the configured interactive approval target without running it.", {
-  requirements: {
-    approval: {
-      interactive: true,
-      response_channel: true,
-      session_grants: "forbidden",
-      auto_review: "forbidden",
-    },
-  },
-});
-assert.equal(acp.assignment.id, "dsh-acp");
+const acp = probes["dsh-acp"]?.available
+  ? await intake.submit("Verify the configured interactive approval target without running it.", {
+      requirements: {
+        approval: {
+          interactive: true,
+          response_channel: true,
+          session_grants: "forbidden",
+          auto_review: "forbidden",
+        },
+      },
+    })
+  : null;
+if (acp) assert.equal(acp.assignment.id, "dsh-acp");
 
 const economy = await intake.submit("Verify economy routing without running a model.", {
   requirements: { execution_strategy: "economy" },
@@ -59,17 +65,23 @@ assert.equal(planAlt.assignment.reasoning_effort, "high");
 
 console.log(JSON.stringify({
   headless: {
-    task_id: headless.task.task_id,
-    work_package_id: headless.work_package.work_package_id,
-    assignment: headless.assignment.id,
-    candidates: headless.recommendation.candidates.map((candidate) => candidate.id),
+    available: Boolean(headless),
+    ...(headless ? {
+      task_id: headless.task.task_id,
+      work_package_id: headless.work_package.work_package_id,
+      assignment: headless.assignment.id,
+      candidates: headless.recommendation.candidates.map((candidate) => candidate.id),
+    } : {}),
   },
   dsh_acp: {
-    task_id: acp.task.task_id,
-    work_package_id: acp.work_package.work_package_id,
-    assignment: acp.assignment.id,
-    candidates: acp.recommendation.candidates.map((candidate) => candidate.id),
-    rejected: acp.recommendation.rejected,
+    available: Boolean(acp),
+    ...(acp ? {
+      task_id: acp.task.task_id,
+      work_package_id: acp.work_package.work_package_id,
+      assignment: acp.assignment.id,
+      candidates: acp.recommendation.candidates.map((candidate) => candidate.id),
+      rejected: acp.recommendation.rejected,
+    } : {}),
   },
   economy: {
     assignment: economy.assignment.id,
@@ -93,5 +105,5 @@ console.log(JSON.stringify({
     reasoning_effort: planAlt.assignment.reasoning_effort,
     collaboration_mode: planAlt.assignment.collaboration_mode,
   },
-  routing_context: headless.routing_context,
+  routing_context: (headless ?? economy).routing_context,
 }, null, 2));

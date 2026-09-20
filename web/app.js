@@ -7,6 +7,7 @@ const state = {
   routing: [],
   providerFlows: {},
   activeView: "conversations",
+  timelineFollow: true,
   poll: null,
 };
 
@@ -52,10 +53,18 @@ function currentTask() {
   return tasks.at(-1) ?? null;
 }
 
+function metricCard(label, value, detail) {
+  return `<article class="metric-card"><span class="metric-label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(detail)}</small></article>`;
+}
+
+function overviewRow(title, detail, value, stateValue = null) {
+  return `<div class="overview-row"><div><strong>${escapeHtml(title)}</strong><small>${escapeHtml(detail)}</small></div><div class="overview-value">${stateValue ? `<span class="badge ${statusClass(stateValue)}">${escapeHtml(value)}</span>` : escapeHtml(value)}</div></div>`;
+}
+
 function renderConversationList() {
   const list = $("#conversationList");
   if (state.conversations.length === 0) {
-    list.innerHTML = '<div class="muted" style="padding:8px;font-size:12px">No conversations yet.</div>';
+    list.innerHTML = '<div class="conversation-list-empty">No conversations yet.</div>';
     return;
   }
   list.innerHTML = state.conversations.map((conversation) => `
@@ -135,12 +144,26 @@ function renderTimeline() {
   const tasks = state.currentConversation?.tasks ?? [];
   if (tasks.length === 0) {
     timeline.classList.add("empty-state");
-    timeline.innerHTML = '<div class="empty-card"><span class="eyebrow">AIDE</span><h2>Start with the goal.</h2><p>AIDE will create a durable Task, choose a qualified Harness, execute, verify, and keep the result in this conversation.</p></div>';
+    timeline.innerHTML = '<div class="empty-card"><span class="eyebrow">AIDE</span><h2>Start with the goal.</h2><p>AIDE will create a durable Task, choose a qualified Harness, execute, verify, and keep the result in this conversation.</p><div class="empty-flow" aria-label="AIDE task flow"><div><strong>1 · Define</strong><small>Describe the outcome.</small></div><div><strong>2 · Route</strong><small>Broker qualifies the target.</small></div><div><strong>3 · Verify</strong><small>Evidence closes the Task.</small></div></div></div>';
   } else {
     timeline.classList.remove("empty-state");
     timeline.innerHTML = tasks.map(timelineCard).join("");
-    timeline.scrollTop = timeline.scrollHeight;
   }
+  if (state.timelineFollow) requestAnimationFrame(() => { timeline.scrollTop = timeline.scrollHeight; });
+  $("#jumpLatestButton").hidden = state.timelineFollow || tasks.length === 0;
+}
+
+function updateTimelineFollow() {
+  const timeline = $("#timeline");
+  state.timelineFollow = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 72;
+  $("#jumpLatestButton").hidden = state.timelineFollow || (state.currentConversation?.tasks?.length ?? 0) === 0;
+}
+
+function jumpToLatest() {
+  state.timelineFollow = true;
+  const timeline = $("#timeline");
+  timeline.scrollTo({ top: timeline.scrollHeight, behavior: "smooth" });
+  $("#jumpLatestButton").hidden = true;
 }
 
 function fact(label, value) {
@@ -229,6 +252,7 @@ async function loadConversations() {
 
 async function openConversation(id) {
   state.currentConversationId = id;
+  state.timelineFollow = true;
   await refreshCurrentConversation();
   const defaults = state.currentConversation?.conversation?.defaults ?? {};
   $("#strategySelect").value = defaults.strategy ?? "";
@@ -283,6 +307,7 @@ async function sendTask(event) {
   const button = $("#sendButton");
   button.disabled = true;
   try {
+    state.timelineFollow = true;
     const request = taskRequest();
     await api(`/v1/conversations/${encodeURIComponent(state.currentConversationId)}/tasks`, { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify(request) });
     await api(`/v1/conversations/${encodeURIComponent(state.currentConversationId)}`, {
@@ -315,9 +340,58 @@ async function loadTasks() {
   ]));
 }
 
+async function loadOverview() {
+  const [tasksData, routingData] = await Promise.all([
+    api("/v1/tasks?limit=24"),
+    api("/v1/routing-history?limit=12"),
+  ]);
+  state.tasks = tasksData.tasks;
+  state.routing = routingData.history;
+  renderOverview();
+}
+
+function renderOverview() {
+  const tasks = state.tasks ?? [];
+  const providers = state.catalog.providers ?? [];
+  const targets = state.catalog.targets ?? [];
+  const activeStates = new Set(["starting", "running", "waiting_input", "waiting_permission", "detached"]);
+  const active = tasks.filter((view) => activeStates.has(view.runtime?.state ?? view.latest_attempt?.status ?? view.task.status)).length;
+  const availableTargets = targets.filter((target) => target.available).length;
+  const connectedProviders = providers.filter((provider) => provider.account?.connected === true).length;
+  $("#overviewStats").innerHTML = [
+    metricCard("Active work", active, `${tasks.length} recent Task${tasks.length === 1 ? "" : "s"} loaded`),
+    metricCard("Execution targets", `${availableTargets}/${targets.length}`, "Available configured profiles"),
+    metricCard("Connected providers", connectedProviders, `${providers.length} provider${providers.length === 1 ? "" : "s"} visible`),
+    metricCard("Conversations", state.conversations.length, "Durable project workspaces"),
+  ].join("");
+
+  const providerRows = providers.map((provider) => {
+    const connected = provider.account?.connected === true;
+    const nativeManaged = provider.account?.status === "native_managed";
+    const label = connected ? "Connected" : nativeManaged ? "Native-managed" : "Not connected";
+    return overviewRow(provider.provider, `${provider.models?.length ?? 0} model${provider.models?.length === 1 ? "" : "s"}`, label, connected ? "completed" : "neutral");
+  });
+  providerRows.push(overviewRow("Execution profiles", `${availableTargets} available`, `${targets.length} total`));
+  $("#overviewRuntime").innerHTML = providerRows.join("") || '<div class="empty-inline">No provider facts available yet.</div>';
+
+  const recentTasks = tasks.slice().sort((a, b) => new Date(b.task.created_at) - new Date(a.task.created_at)).slice(0, 6);
+  $("#overviewRecentTasks").innerHTML = recentTasks.map((view) => {
+    const taskState = view.runtime?.state ?? view.latest_attempt?.status ?? view.task.status;
+    return overviewRow(view.task.objective, view.latest_attempt?.assignment?.id ?? "Awaiting assignment", taskState, taskState);
+  }).join("") || '<div class="empty-inline">No Tasks yet. Start a conversation to create one.</div>';
+
+  const routing = (state.routing ?? []).slice().reverse().slice(0, 6);
+  $("#overviewRouting").innerHTML = routing.map((row) => {
+    const actual = row.routing?.actual ?? {};
+    const outcome = row.routing?.outcome ?? {};
+    const result = outcome.accepted === true ? "accepted" : outcome.accepted === false ? "rejected" : outcome.status ?? "recorded";
+    return overviewRow(actual.target_id ?? "Unassigned", [actual.model, actual.reasoning_effort].filter(Boolean).join(" · ") || actual.role || "execution", result, result === "accepted" ? "completed" : result === "rejected" ? "failed" : "neutral");
+  }).join("") || '<div class="empty-inline">Routing history will appear after AIDE assigns work.</div>';
+}
+
 function renderModels() {
   const providers = state.catalog.providers ?? [];
-  $("#modelCards").innerHTML = providers.map((provider) => providerCard(provider)).join("");
+  $("#modelCards").innerHTML = providers.map((provider) => providerCard(provider)).join("") || '<div class="empty-inline">No provider catalog is available.</div>';
   $("#modelCards").querySelectorAll("[data-provider-action]").forEach((button) => button.addEventListener("click", handleProviderAction));
 }
 
@@ -437,7 +511,7 @@ function renderHarnesses() {
       <p>Sandbox: ${escapeHtml(target.approval_contract?.sandbox_mode ?? "native")}</p>
       <p>Approval profile: ${escapeHtml(target.approval_contract?.profile ?? "native")}</p>
       <div class="capabilities">${(target.capabilities ?? []).map((cap) => `<span class="chip">${escapeHtml(cap)}</span>`).join("")}</div>
-    </article>`).join("");
+    </article>`).join("") || '<div class="empty-inline">No configured Harness targets are available.</div>';
 }
 
 function renderSettings() {
@@ -469,13 +543,19 @@ async function loadRouting() {
 }
 
 function table(headers, rows) {
+  if (rows.length === 0) return '<div class="empty-inline">No records yet.</div>';
   return `<table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
 async function switchView(view) {
   state.activeView = view;
   document.querySelectorAll(".view").forEach((el) => el.classList.toggle("active", el.id === `${view}View`));
-  document.querySelectorAll(".nav-tab").forEach((el) => el.classList.toggle("active", el.dataset.view === view));
+  document.querySelectorAll(".nav-tab").forEach((el) => {
+    const active = el.dataset.view === view;
+    el.classList.toggle("active", active);
+    if (active) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
+  });
+  if (view === "overview") await loadOverview();
   if (view === "tasks") await loadTasks();
   if (view === "routing") await loadRouting();
   if (view === "models") renderModels();
@@ -505,7 +585,9 @@ async function archiveConversation() {
 async function init() {
   try {
     const [health, catalog] = await Promise.all([api("/health"), api("/v1/catalog")]);
-    $("#healthText").textContent = health.ok ? "Service healthy" : "Service unavailable";
+    $("#healthText").textContent = health.ok ? "Healthy" : "Unavailable";
+    $("#healthText").classList.toggle("healthy", health.ok === true);
+    $("#healthText").classList.toggle("failed", health.ok !== true);
     state.catalog = catalog;
     renderCatalogSelect();
     renderModels();
@@ -516,15 +598,26 @@ async function init() {
     state.poll = setInterval(() => { if (state.activeView === "conversations") void refreshCurrentConversation(); }, 1800);
   } catch (error) {
     $("#healthText").textContent = "Connection failed";
+    $("#healthText").classList.add("failed");
     toast(error.message);
   }
 }
 
 $("#newConversationButton").addEventListener("click", () => void createConversation());
+$("#overviewNewConversationButton").addEventListener("click", () => void createConversation());
+$("#overviewRefreshButton").addEventListener("click", () => void loadOverview().catch((error) => toast(error.message)));
 $("#renameConversationButton").addEventListener("click", () => void renameConversation().catch((error) => toast(error.message)));
 $("#archiveConversationButton").addEventListener("click", () => void archiveConversation().catch((error) => toast(error.message)));
 $("#refreshButton").addEventListener("click", () => void refreshCurrentConversation());
 $("#composer").addEventListener("submit", sendTask);
+$("#timeline").addEventListener("scroll", updateTimelineFollow, { passive: true });
+$("#jumpLatestButton").addEventListener("click", jumpToLatest);
+$("#messageInput").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    $("#composer").requestSubmit();
+  }
+});
 $("#strategySelect").addEventListener("change", updateSelectionHint);
 $("#targetSelect").addEventListener("change", () => renderModelSelect());
 $("#modelSelect").addEventListener("change", () => renderEffortSelect());
@@ -535,5 +628,6 @@ $("#modeSelect").addEventListener("change", () => {
   renderModelSelect();
 });
 document.querySelectorAll(".nav-tab").forEach((button) => button.addEventListener("click", () => void switchView(button.dataset.view)));
+document.querySelectorAll("[data-view-link]").forEach((button) => button.addEventListener("click", () => void switchView(button.dataset.viewLink)));
 
 void init();

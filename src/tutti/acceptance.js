@@ -1,6 +1,7 @@
 export function evaluateAcceptance({ result, evidence, criteria = {} } = {}) {
   const checks = [];
   const check = (name, passed, actual = undefined, expected = undefined) => checks.push({ name, passed, ...(actual === undefined ? {} : { actual }), ...(expected === undefined ? {} : { expected }) });
+  const normalizeText = (value) => typeof value === "string" ? value.replace(/\r\n/g, "\n") : value;
 
   check("harness_completed", result?.status === "completed", result?.status ?? null, "completed");
   if (criteria.finalText !== undefined) check("final_text", result?.final_text === criteria.finalText, result?.final_text ?? null, criteria.finalText);
@@ -9,7 +10,7 @@ export function evaluateAcceptance({ result, evidence, criteria = {} } = {}) {
   for (const [path, expectedText] of Object.entries(criteria.files ?? {})) {
     const file = files.get(path);
     check(`file:${path}:exists`, Boolean(file), Boolean(file), true);
-    if (file) check(`file:${path}:text`, file.text === expectedText, file.text, expectedText);
+    if (file) check(`file:${path}:text`, normalizeText(file.text) === normalizeText(expectedText), file.text, expectedText);
   }
 
   return { accepted: checks.every((item) => item.passed), checks };

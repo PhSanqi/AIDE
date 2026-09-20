@@ -65,6 +65,7 @@ export class HarnessRouter {
       "codex-review": codexReview,
     };
     this.runs = new Map();
+    this.sessionHarnesses = new Map();
   }
 
   async probe() {
@@ -130,7 +131,10 @@ export class HarnessRouter {
     this.runs.set(runId, run);
 
     const onEvent = (event) => {
-      if (event.type === "session" && typeof event.sessionId === "string") run.sessionId = event.sessionId;
+      if (event.type === "session" && typeof event.sessionId === "string") {
+        run.sessionId = event.sessionId;
+        this.sessionHarnesses.set(event.sessionId, harness);
+      }
       run.events.push({ seq: run.nextSeq++, event });
       if (run.events.length > MAX_BUFFERED_EVENTS) { run.events.shift(); run.droppedEvents += 1; }
     };
@@ -144,6 +148,7 @@ export class HarnessRouter {
       void run.handle.done.then((result) => {
         run.result = result;
         run.sessionId = result.session_id ?? run.sessionId;
+        if (run.sessionId) this.sessionHarnesses.set(run.sessionId, harness);
         run.state = result.status;
       });
       return this.status(runId);
@@ -154,9 +159,13 @@ export class HarnessRouter {
     }
   }
 
-  continue({ sessionId, task, cwd, harness = "dsh", context = undefined, outputSchema = undefined, model = undefined, reasoningEffort = undefined } = {}) {
+  continue({ sessionId, task, cwd, harness = undefined, context = undefined, outputSchema = undefined, model = undefined, reasoningEffort = undefined } = {}) {
     if (typeof sessionId !== "string" || sessionId.length === 0) throw new TypeError("sessionId is required to continue a harness session.");
-    return this.start({ harness, task, cwd, sessionId, context, outputSchema, model, reasoningEffort });
+    const boundHarness = this.sessionHarnesses.get(sessionId) ?? null;
+    if (boundHarness !== null && harness !== undefined && harness !== boundHarness) {
+      throw Object.assign(new Error(`Harness session ${sessionId} belongs to ${boundHarness}, not ${harness}.`), { code: "HARNESS_SESSION_HARNESS_MISMATCH" });
+    }
+    return this.start({ harness: boundHarness ?? harness ?? "dsh", task, cwd, sessionId, context, outputSchema, model, reasoningEffort });
   }
 
   status(runId) {

@@ -398,6 +398,40 @@ function semanticDecomposition(requirements) {
   return { mode, target };
 }
 
+function prepareIntakeRequest(message, { acceptance = {}, constraints = [], requirements = {}, clientRequestId = null, requestContext = {}, defaultExecutionStrategy = null, targetPreference = [] } = {}) {
+  if (typeof message !== "string" || message.trim().length === 0) throw new TypeError("Intake message must be a non-empty string.");
+  semanticAcceptanceCriteria(acceptance);
+  if (!Array.isArray(constraints) || constraints.length > 32 || constraints.some((item) => typeof item !== "string" || item.trim().length === 0 || item.length > 1_000)) {
+    throw new TypeError("constraints must be an array of at most 32 non-empty strings up to 1000 characters.");
+  }
+  const objective = message.trim();
+  const withStrategy = requirements.execution_strategy !== undefined || defaultExecutionStrategy === null
+    ? requirements
+    : { ...requirements, execution_strategy: defaultExecutionStrategy };
+  const effectiveRequirements = Array.isArray(withStrategy.preferred_targets) || targetPreference.length === 0
+    ? withStrategy
+    : { ...withStrategy, preferred_targets: targetPreference };
+  const planning = planConsensus(effectiveRequirements);
+  const decomposition = semanticDecomposition(effectiveRequirements);
+  const requestedModel = effectiveRequirements.requested_model ?? null;
+  const requestedEffort = effectiveRequirements.requested_reasoning_effort ?? null;
+  if (requestedModel !== null && (typeof requestedModel !== "string" || requestedModel.trim().length === 0)) throw new TypeError("requested_model must be a non-empty string.");
+  if (requestedEffort !== null && (typeof requestedEffort !== "string" || requestedEffort.trim().length === 0)) throw new TypeError("requested_reasoning_effort must be a non-empty string.");
+  if (requestedEffort !== null && requestedModel === null) throw new TypeError("requested_reasoning_effort requires requested_model.");
+  if (requestedModel !== null && (planning.mode !== "none" || decomposition.mode !== "none")) throw new TypeError("Explicit model selection is only supported for direct execution in the Current UI slice.");
+  if (requestedModel !== null && (!Array.isArray(effectiveRequirements.preferred_targets) || effectiveRequirements.preferred_targets.length !== 1)) {
+    throw new TypeError("Explicit model selection requires exactly one preferred target profile.");
+  }
+  const requestFingerprint = clientRequestId === null ? null : createHash("sha256").update(canonicalJson({
+    objective,
+    acceptance,
+    constraints,
+    requirements: effectiveRequirements,
+    request_context: requestContext,
+  })).digest("hex");
+  return { objective, acceptance, constraints, effectiveRequirements, planning, decomposition, requestFingerprint };
+}
+
 function normalizeSemanticDecision(text, objective) {
   let value;
   try { value = JSON.parse(text); }
@@ -630,33 +664,15 @@ export class TuttiIntake {
   }
 
   async submit(message, { acceptance = {}, constraints = [], requirements = {}, clientRequestId = null, requestContext = {}, conversationId = null } = {}) {
-    if (typeof message !== "string" || message.trim().length === 0) throw new TypeError("Intake message must be a non-empty string.");
-    semanticAcceptanceCriteria(acceptance);
-    const objective = message.trim();
-    const withStrategy = requirements.execution_strategy !== undefined || this.defaultExecutionStrategy === null
-      ? requirements
-      : { ...requirements, execution_strategy: this.defaultExecutionStrategy };
-    const effectiveRequirements = Array.isArray(withStrategy.preferred_targets) || this.targetPreference.length === 0
-      ? withStrategy
-      : { ...withStrategy, preferred_targets: this.targetPreference };
-    const planning = planConsensus(effectiveRequirements);
-    const decomposition = semanticDecomposition(effectiveRequirements);
-    const requestedModel = effectiveRequirements.requested_model ?? null;
-    const requestedEffort = effectiveRequirements.requested_reasoning_effort ?? null;
-    if (requestedModel !== null && (typeof requestedModel !== "string" || requestedModel.trim().length === 0)) throw new TypeError("requested_model must be a non-empty string.");
-    if (requestedEffort !== null && (typeof requestedEffort !== "string" || requestedEffort.trim().length === 0)) throw new TypeError("requested_reasoning_effort must be a non-empty string.");
-    if (requestedEffort !== null && requestedModel === null) throw new TypeError("requested_reasoning_effort requires requested_model.");
-    if (requestedModel !== null && (planning.mode !== "none" || decomposition.mode !== "none")) throw new TypeError("Explicit model selection is only supported for direct execution in the Current UI slice.");
-    if (requestedModel !== null && (!Array.isArray(effectiveRequirements.preferred_targets) || effectiveRequirements.preferred_targets.length !== 1)) {
-      throw new TypeError("Explicit model selection requires exactly one preferred target profile.");
-    }
-    const requestFingerprint = clientRequestId === null ? null : createHash("sha256").update(canonicalJson({
-      objective,
+    const { objective, effectiveRequirements, planning, decomposition, requestFingerprint } = prepareIntakeRequest(message, {
       acceptance,
       constraints,
-      requirements: effectiveRequirements,
-      request_context: requestContext,
-    })).digest("hex");
+      requirements,
+      clientRequestId,
+      requestContext,
+      defaultExecutionStrategy: this.defaultExecutionStrategy,
+      targetPreference: this.targetPreference,
+    });
     const submission = await this.store.createSubmission({
       objective,
       acceptance,
@@ -685,6 +701,52 @@ export class TuttiIntake {
     });
     const routingAdvice = await this.#shadowAdvice({ objective, requirements: routingRequirements, recommendation, assignment: selected });
     return { task, work_package: workPackage, routing_context: routingContext, recommendation, assignment: selected, routing_advice: routingAdvice, idempotent_replay: submission.replayed };
+  }
+
+  async preflight(message, { acceptance = {}, constraints = [], requirements = {}, workspace = undefined } = {}) {
+    const { objective, effectiveRequirements, planning, decomposition } = prepareIntakeRequest(message, {
+      acceptance,
+      constraints,
+      requirements,
+      defaultExecutionStrategy: this.defaultExecutionStrategy,
+      targetPreference: this.targetPreference,
+    });
+    const routingRequirements = decomposition.mode === "plan"
+      ? decompositionRoutingRequirements(effectiveRequirements, decomposition.target)
+      : planning.mode === "dual"
+        ? planningRoutingRequirements(effectiveRequirements, planning.targets[0])
+        : effectiveRequirements;
+    const recommendation = recommendCandidates({ requirements: routingRequirements, targets: targetsFromHarnessProbe(await this.router.probe()) });
+    const assignment = chooseAssignment(recommendation, routingRequirements, {
+      noneCode: "NO_QUALIFIED_HARNESS",
+      noneMessage: "Broker found no qualified Harness for the submitted work.",
+      decisionPrefix: decomposition.mode === "plan" ? "semantic_decomposition_" : "",
+    });
+    const isolation = assignment.role === "planning" ? "direct" : effectiveRequirements.workspace_isolation ?? "direct";
+    if (!['direct', 'attempt'].includes(isolation)) throw new TypeError("workspace_isolation must be direct or attempt.");
+    if (isolation === "attempt" && workspace !== undefined) {
+      throw Object.assign(new Error("Caller-provided workspace is incompatible with attempt isolation."), { code: "WORKSPACE_ISOLATION_PATH_FORBIDDEN" });
+    }
+    if (isolation === "direct" && workspace !== undefined && (typeof workspace !== "string" || workspace.length === 0)) throw new TypeError("Execution workspace must be a non-empty string when supplied.");
+    return {
+      dry_run: true,
+      objective,
+      constraints: structuredClone(constraints),
+      acceptance: structuredClone(acceptance),
+      requirements: structuredClone(effectiveRequirements),
+      workflow: decomposition.mode === "plan" ? "decompose" : planning.mode === "dual" ? "crossfire" : "direct",
+      routing_requirements: structuredClone(routingRequirements),
+      recommendation,
+      assignment,
+      workspace: {
+        isolation,
+        path: isolation === "direct" ? (workspace ?? this.context.root) : null,
+        project_root: this.context.root,
+        allocation_required: isolation === "attempt",
+      },
+      durable_state_created: false,
+      native_run_started: false,
+    };
   }
 
   async submitAndRun(message, { workspace, acceptance = {}, constraints = [], requirements = {}, facts, timeoutMs = 120_000, cancelGraceMs = 5_000, signal, conversationId = null } = {}) {

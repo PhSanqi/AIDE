@@ -46,6 +46,10 @@ export class AideServiceRuntime {
     await this.#assertLive();
     return this.#track(this.control.submit(message, { ...options, signal: this.abortController.signal }));
   }
+  async preflight(message, options = {}) {
+    await this.#assertLive();
+    return this.control.preflight(message, options);
+  }
   async enqueue(message, options = {}, { clientRequestId = null } = {}) {
     if (clientRequestId !== null) {
       if (typeof clientRequestId !== "string" || clientRequestId.trim().length === 0 || clientRequestId.length > 256) throw new TypeError("clientRequestId must be a non-empty string up to 256 characters.");

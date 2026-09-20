@@ -1,190 +1,194 @@
 # AIDE
 
-**Agentic Integrated Development Engine**
+AIDE is a multi-Harness engineering orchestration system for one developer coordinating multiple native agents.
 
-> @HarnessRouter · @Tutti — 把 Native Harness、任务状态、模型选择、执行验证和恢复统一到一个本地开发入口。
+Its target architecture follows three complementary responsibilities rather than one central component:
 
-[English](./README_EN.md)
+- **Tutti** — WHAT: Goal, Current Truth, Task Graph, Decisions, shared context and semantic verification.
+- **Broker** — WHO: resource/capability intelligence, health/quota/cost/history and explainable candidate recommendation.
+- **HarnessRouter** — RUN: Native Harness process/session/protocol lifecycle.
 
-AIDE 是一个本地优先的 AI 开发编排工具。它把多个 Native Harness、模型选择、任务执行、Git 工作区、验证、恢复和管理界面放进一套统一工作流中。
+Native Harnesses such as Claude Code and Codex keep their own agent loops, context, tools, compaction and subagent behavior. Workspace/Evidence provides the physical truth through Git/worktrees, diffs, tests, logs and artifacts.
 
-它不是新的 IDE，也不试图替代 Codex、DSH 等原生 Agent。AIDE 负责把它们组织起来，让一次开发任务从“发起”一直走到“执行、验证、恢复、记录结果”。
+The Current Windows Broker implementation is an important source of proven mechanisms, but it is not the skeleton of AIDE. Useful Broker patterns are extracted and placed into the target responsibility where they belong.
 
-## 主要功能
+## Current checkpoint
 
-- **统一管理页面**：在浏览器中创建 Conversation、发送 Task、查看执行状态和结果。
-- **多 Harness 调度**：当前支持 Codex，并预留 DSH Native Harness 接入路径。
-- **模型与推理强度选择**：读取 Codex 原生模型目录，并在受支持的 Direct Task 中选择具体 model / reasoning effort。
-- **三种任务模式**：Direct、Decompose、Crossfire。
-- **任务生命周期管理**：支持启动、状态跟踪、Steer、Cancel、Pending Interaction 和显式 Recovery。
-- **Git 隔离工作区**：任务可以在独立 worktree 中执行，保留 diff、测试和落地证据。
-- **执行验证**：机械验证、语义验证和分步 verification 可以共同决定 Task 是否完成。
-- **路由历史**：查看真实 target/model 路由、执行结果和 shadow advice，不让观测逻辑偷偷改变当前路由。
-- **账号与模型管理**：Codex 支持原生账号状态、ChatGPT 登录、Device Code、write-only API Key 和模型目录读取。
-- **Ubuntu + Windows**：一套代码支持两个平台；Ubuntu 是主力开发平台，Windows 使用对应的 launcher、状态目录和进程树管理机制。
+The current local execution baseline is working across multiple configured targets:
 
-## 当前适合做什么
-
-AIDE 适合个人开发者或小型开发流程，用一个入口管理 AI coding agents，例如：
-
-- 让不同模型承担普通实现、复杂实现、规划和 review；
-- 对一个代码库持续发起任务，并保留 Task/Attempt 状态；
-- 在 Agent 退出、终端断开或任务中断后恢复工作；
-- 在真正合并代码前检查 diff、测试、验证结果和运行证据；
-- 在 Ubuntu 和 Windows 上保持同一套开发编排方式。
-
-## 安装
-
-推荐直接下载 GitHub Releases 中与你的平台对应的压缩包：
-
-- `AIDE-*-linux-x64.tar.gz`
-- `AIDE-*-windows-x64.zip`
-- `AIDE-*-linux-x64-full.tar.gz`（内置 Node.js/npm）
-- `AIDE-*-windows-x64-full.zip`（内置 Node.js/npm）
-
-**Standard 包**更小，需要宿主机已经安装 Node.js 22+。**Full 包**自带 Node.js/npm，适合直接解压安装；两种包都不会捆绑 Codex、DSH 等 Harness，也不会自动修改 Harness 版本。
-
-Linux 解压后：
-
-```bash
-./install.sh
-aide /path/to/your/project
+```text
+Task requirements
+-> Broker hard gate + strategy ranking
+-> Tutti assignment
+-> DSH Headless / DSH ACP / Codex configured target
+-> Workspace/Evidence
+-> Tutti acceptance / safe handoff / closure
 ```
 
-Windows 解压后，在 PowerShell 中：
+Local contracts are covered by `npm test`. Real model smoke runs are deliberately gated behind `AIDE_ALLOW_MODEL_CALL=1`; do not enable that flag without explicit authorization because it consumes model resources. Current crossfire is `Sol/medium -> Sol/high -> Sol/ultra`; the corrected role-separation + native Plan hydration path has now passed a real semantic smoke with substantive distinct planner outputs and explicit executor arbitration.
 
-```powershell
-.\install.ps1
-aide C:\path\to\your\project
+Current routing telemetry is provider-neutral and observational: each new Attempt can persist Broker candidates/rejections, the frozen actual target/model/effort, optional fail-open shadow advice, sanitized native Codex rate-limit facts, terminal verification, and the latest native thread token-usage snapshot. These facts do not yet enable automatic `adaptive` routing or claim exact per-Attempt monetary cost.
+
+Codex runtime telemetry also separates requested model provenance from effective runtime model after native `model/rerouted`, and persists native context-compaction observations. These remain evidence for later calibration; AIDE does not countermand native safety reroutes or infer an exact context percentage from a compaction event.
+
+HarnessRouter can also pass an optional native JSON `outputSchema` to Codex turns. The primitive is available for future typed decomposition/planning, but Current Tutti does not add an implicit planning call to normal submissions.
+
+Structured semantic decomposition is available only by explicit capability intent (`decompose=true`, internally `semantic_decomposition=plan`). One read-only structured planner writes a durable Task Decision and ordered steps, then one executor consumes that decision. Economy never gets the extra planner implicitly, and decomposition cannot currently be combined with dual-plan crossfire or expanded into autonomous per-step WorkPackages.
+
+Task `constraints` are also explicit first-class semantic state. They are shared with planners/executors through Context Capsules and survive handoff/decomposition, but remain separate from Broker-facing WorkPackage requirements and from final acceptance criteria.
+
+Tasks may also request explicit semantic acceptance. HTTP/MCP expose top-level `semantic_acceptance: string[]` and map it to durable `acceptance.semantic`; lower-level callers may still use `acceptance.semantic` directly. Mechanical evidence must pass first; the service wires a read-only `codex-review` semantic verifier by default, and it runs only when semantic criteria are explicitly present. The verifier can only judge the supplied criteria verbatim. Missing/invalid/rejecting semantic review fails closed, and isolated candidate work is not landed before semantic acceptance passes.
+
+Task continuity is now shared without transcript synchronization: Execution Capsules include bounded prior WorkPackage/Attempt outcome and evidence-reference summaries, while native Codex context tools can request accepted `current_truth` or bounded `evidence(taskId)` on demand. Crossfire planning text remains isolated between planners.
+
+`current_truth` retrieval also resolves the durable Task/Attempt references into bounded provenance: Goal, constraints, semantic Decision, accepted verification/reviewer evidence refs, and requested/effective model. Evidence-file bodies are not duplicated into the truth layer.
+
+## Repository location
+
+```text
+/home/z/codex-workspace/AIDE
 ```
 
-安装器不会自动安装 Harness。Standard 包需要宿主机提供 Node.js 22+；Full 包已经内置 Node.js 22.23.2/npm。两种包都需要 Git 和至少一个受支持 Harness。Harness 安装和检测见 [HARNESS_SETUP.md](./HARNESS_SETUP.md)。
+`ServerWorker` is only the development/remote-control tool used to access this Linux host. It is not an AIDE runtime component.
 
-也可以不安装，直接在解压目录运行 `./aide` 或 `aide.cmd`。
+## Broker Current Source
 
-## 环境要求
+```text
+C:\Users\Administrator\Desktop\CodeX Workspace\Personal\Broker
+```
 
-需要准备：
+Broker source inspection uses `@DevSpaceV1` unless this project rule is explicitly changed.
 
-- Git；
-- 至少一个受支持 Harness：推荐 Codex；也可以使用 DSH；
-- Standard 包额外需要 Node.js 22 或更高版本。
+See:
 
-Full 包已经包含 Node.js 22.23.2/npm，因此 Full 包用户不需要另外安装 Node.js。
+- `docs/CURRENT_TRUTH.md` — what is implemented/verified now versus still Target/Unknown.
+- `docs/CURRENT_ARCHITECTURE.md` — concise Current runtime graph, durable state, routing/resource telemetry, and prioritized remaining gaps.
+- `docs/ARCHITECTURE.md` — synthesis of Tutti + Broker + HarnessRouter based on the original architecture guide.
+- `docs/PROJECT_RESPONSIBILITIES.md` — what each AIDE module, local project, Native Harness, and open-source reference is responsible for.
+- `docs/BOUNDARY_CONTRACTS.md` — context, session, workspace, cancellation, retry, permission, evidence, and handoff boundaries.
+- `docs/EXECUTION_STRATEGY.md` — minimal vertical-slice development policy and current implementation order.
+- `docs/COMPONENT_REUSE_MATRIX.md` — useful mechanisms extracted from the three responsibilities and where they belong in AIDE.
+- `docs/JEV_REFERENCE_EVALUATION.md` — audited JEV Router / Review / Desktop ideas, what AIDE should reuse, and what should remain external/reference-only.
 
-## 从源码运行
-
-克隆仓库后进入目录：
+Current local checks:
 
 ```bash
 npm test
-npm run smoke:platform
+npm run smoke:intake   # real local routing probe: DSH + ACP + economy + capability + Plan; no model call
+```
+- Memhub project `aide` — authoritative architecture and Current Truth source for ongoing AIDE work. Legacy repo-local Normify material is reference-only.
+
+## Run the local AIDE service
+
+The composition root serves the JSON HTTP/Plugin API and modern MCP `2026-07-28` from one backend runtime:
+
+```bash
+AIDE_PROJECT_ROOT=/path/to/project \
+AIDE_EXECUTION_STRATEGY=economy \
 npm run service
 ```
 
-然后打开：
+From the AIDE repository itself, both Ubuntu and Windows can use the same default entrypoint with no shell-specific environment syntax:
 
-```text
-http://127.0.0.1:8711/
+```bash
+npm run service
 ```
 
-`smoke:platform` 不会发送模型任务，可用于检查当前系统上的 Git、状态目录、Service Lease、Codex app-server 和平台运行能力。
-
-## 管理页面
-
-当前包含：
-
-- **Conversations**：创建和管理对话式开发任务；
-- **Tasks**：查看 Task、Attempt 和运行状态；
-- **Models & Accounts**：查看 Codex 账号、模型与 reasoning effort；
-- **Harnesses & Modes**：查看可用 Harness 和 Native mode；
-- **Routing**：查看真实路由历史；
-- **Settings**：查看当前本地服务配置。
-
-在 Conversation 中可以为下一次 Task 选择：
-
-```text
-Strategy -> Target -> Model -> Effort -> AIDE Mode
-```
-
-## AIDE Mode
-
-### Direct
-
-直接选择一个合格的执行目标完成任务。当前 exact model / reasoning effort 选择主要用于这个模式。
-
-### Decompose
-
-先生成有明确目标和 verification 条件的分步计划，再由执行 Harness 完成，并在结束后验证各步骤。
-
-### Crossfire
-
-使用多个独立规划结果进行交叉比较，再进入执行流程。适合复杂任务，但会增加模型调用。
-
-## Codex 账号与模型
-
-AIDE 使用 Codex 原生 app-server 接口读取账号状态和模型目录。
-
-管理页支持：
-
-- ChatGPT 浏览器登录；
-- Device Code 登录；
-- API Key 写入；
-- Logout；
-- exact model 列表；
-- 每个模型支持的 reasoning effort。
-
-API Key 按 write-only 处理，不会在管理页面中回显。
-
-## 平台说明
-
-### Ubuntu
-
-Ubuntu 是当前主要开发和真实运行验证平台。
-
-默认状态目录：
-
-```text
-~/.local/state/aide/
-```
-
-### Windows
-
-Windows 使用同一套 AIDE 代码，不维护单独的 Windows 版本。
-
-默认状态目录：
-
-```text
-%LOCALAPPDATA%\AIDE\state\
-```
-
-Windows 支持与 Ubuntu 一致的 Task 启动、Cancel 和异常退出后的恢复流程。
-
-## 常用配置
-
-通常只需要以下环境变量：
-
-| 变量 | 用途 |
-| --- | --- |
-| `AIDE_PROJECT_ROOT` | 指定要操作的项目目录 |
-| `AIDE_CONTROL_HOST` | 控制服务监听地址 |
-| `AIDE_CONTROL_PORT` | 控制服务端口，默认 `8711` |
-| `AIDE_CONTROL_TOKEN` | 非 loopback 监听时使用的 Bearer Token |
-| `AIDE_STATE_DIR` | 覆盖默认状态目录 |
-| `AIDE_CODEX_COMMAND` | 覆盖 Codex 可执行文件 |
-| `AIDE_DSH_COMMAND` | 覆盖 DSH 可执行文件 |
-| `AIDE_EXECUTION_STRATEGY` | 设置默认 execution strategy |
-
-## 验证
+Ubuntu remains the primary development host. The Current Codex-backed V1 runtime/control/UI path is validated on both Ubuntu and Windows using the same Node/Tutti/Broker/Control/UI code; only launcher, state-root, and process-tree mechanics differ below the runtime boundary. Before calling a future runtime/UI change cross-platform Current, run on each supported host:
 
 ```bash
 npm test
 npm run smoke:platform
-npm run smoke:intake
 ```
 
-部分高级 smoke 会真正调用模型，并要求显式设置 `AIDE_ALLOW_MODEL_CALL=1`。普通测试和 `smoke:platform` 不会主动消耗模型额度。
+`smoke:platform` is non-generative. It does not send a model Task. Windows Codex npm shims are launched through `cmd.exe`; PowerShell execution policy is therefore not part of AIDE's runtime contract.
 
-## 项目状态
+Defaults:
 
-AIDE 仍处于早期开发阶段。当前重点是把本地 AI coding workflow 做稳定，而不是提供大型团队、多租户或云端协作平台。
+- HTTP: `127.0.0.1:8711`;
+- Management UI: `http://127.0.0.1:8711/`;
+- MCP: `/mcp` on the same server;
+- Work State + service lease: Ubuntu `~/.local/state/aide/<project-hash>/`; Windows `%LOCALAPPDATA%\AIDE\state\<project-hash>\`;
+- execution strategy: `economy` unless overridden;
+- optional overrides: `AIDE_CONTROL_HOST`, `AIDE_CONTROL_PORT`, `AIDE_CONTROL_TOKEN`, `AIDE_STATE_DIR`, `AIDE_STATE_PATH`, `AIDE_SERVICE_LEASE`, `AIDE_SHADOW_MIN_SAMPLES`.
+
+Execution strategy is explicit and does not depend on alphabetical model names:
+
+- `economy` defaults to the verified `codex-economy` profile (`gpt-5.6-luna`, low reasoning) and is the service default;
+- `capability` defaults to `codex-capability` (`gpt-5.6-sol`, ultra reasoning). The current native catalog declares proactive multi-agent support for this profile;
+- the two configured profiles are not automatic fallbacks for one another. If a requested profile is unavailable, AIDE blocks unless another explicit routing preference resolves the choice;
+- per-task HTTP/MCP submission may set `strategy: "economy" | "capability"`, overriding the service default;
+- `crossfire: true` is an explicit capability-mode opt-in. Tutti runs two independent read-only Plan targets, then passes both durable plan outputs to one capability executor for arbitration/execution. Crossfire is never enabled implicitly in economy mode;
+- exact configured models can be overridden with `AIDE_ECONOMY_CODEX_MODEL`, `AIDE_ECONOMY_CODEX_EFFORT`, `AIDE_CAPABILITY_CODEX_MODEL`, `AIDE_CAPABILITY_CODEX_EFFORT`, `AIDE_PLAN_CODEX_MODEL`, `AIDE_PLAN_CODEX_EFFORT`, `AIDE_PLAN_ALT_CODEX_MODEL`, and `AIDE_PLAN_ALT_CODEX_EFFORT`.
+
+These are routing profiles, not price claims. AIDE verifies the configured models/efforts against the live Codex `model/list` catalog but does not currently ingest a billing-price table.
+
+Non-loopback HTTP binding requires a bearer token. The service prints its owner id, address, state path, and Tasks that require recovery after restart. An enqueued Task keeps running after its transport request returns.
+
+The local management UI is the primary human entry. The Current UI provides an Overview control-center snapshot plus durable Conversations, Task timeline/inspection, next-send strategy/target/model/reasoning-effort/orchestration-mode selection, cancel/steer/recovery/interaction controls, Harness/mode inspection, routing history, and service settings. It remains dependency-light vanilla HTML/CSS/JS served by the same AIDE process, but is now responsive instead of relying on a fixed desktop minimum width. Conversation defaults apply only to future Tasks; they never mutate an in-flight frozen Assignment.
+
+Before creating durable work, clients can call `POST /v1/preflight` or MCP `aide_preflight`. Preflight uses the same Tutti/Broker request, routing, exact-model, and workspace-isolation gates as submission, but creates no Task/WorkPackage/Attempt, allocates no worktree, and starts no Native Harness. This is the preferred first step for AIDE self-development and other high-impact automation.
+
+`Models & Accounts` now uses the Codex app-server's native account/model APIs. It can read sanitized account status, list the live exact model directory and each model's supported reasoning efforts, start ChatGPT browser login or device-code login, accept an API key as a write-only value, cancel an in-flight login, and request native logout. API keys are never returned by AIDE and are not copied into Work State, Current Truth, or model prompts. DSH remains explicitly `Native-managed`: the installed DSH Web product has useful authorization/settings/credential semantics, but the currently verified AIDE DSH adapters do not expose a stable provider-auth/configuration protocol and AIDE does not import DSH's internal Cordis services as runtime dependencies.
+
+For **Direct** execution, the composer may also select an exact Codex model and one reasoning effort advertised for that model, but only after choosing one concrete Codex target/profile. Broker validates the requested pair against that target's live model directory and keeps all target capability, sandbox, and approval gates in force; Tutti freezes the resulting model/effort in the Assignment. Explicit model overrides are intentionally rejected for Decompose/Crossfire in the Current slice because those workflows have separate planner/executor/reviewer profiles.
+
+For retry-safe submission, send an explicit request id:
+
+- HTTP: `Idempotency-Key: <opaque-client-request-id>` on `POST /v1/tasks`;
+- MCP: `client_request_id` in `aide_submit` arguments.
+
+The same id returns the same durable Task after reconnect/restart. Reusing it with different task semantics is rejected.
+
+Routing/outcome history is exposed as a read-only observational surface for offline analysis:
+
+- HTTP: `GET /v1/routing-history?limit=100`;
+- MCP: `aide_routing_history { limit }`.
+
+This history never changes current assignment policy. It reports bounded terminal routing facts, outcomes, native usage scope, and wall-clock Attempt duration, and intentionally omits raw Task objective text.
+
+For deterministic offline calibration without starting a Harness or calling a model:
+
+```bash
+npm run replay:routing
+```
+
+The local service also wires an observe-only historical shadow advisor. By default it requires at least 10 comparable samples for the actual target and one alternative (`AIDE_SHADOW_MIN_SAMPLES=10`). Sparse history is recorded as `insufficient_history`; it does not invent confidence or choose an alternate target. Even when history is sufficient, shadow advice is telemetry only and cannot change the actual assignment.
+
+Detached active Attempts are never silently resumed. Use `/v1/recoveries` / `aide_recoveries` to inspect them, then explicitly recover with `abandon`, `reroute`, or `finalize`. `finalize` is only for an Attempt with a durable terminal-result/finalization checkpoint after native quiescence; it resumes verification/closure without re-executing the native task. AIDE uses the persisted Attempt side-effect classification; callers no longer supply `side_effects`. Current POSIX Native Harness launches persist an owned process-group id; same-host recovery fences on the whole group when available and falls back to the primary PID only for older/non-group Attempts. Otherwise pass `quiescent=true` only after independently confirming the old native process is stopped. `reroute` is permitted only for persisted `none`, or contained `workspace_only` effects in an unlanded isolated workspace.
+
+Windows uses the same recovery contract with different OS mechanics: Native Harness launches persist a `process_tree_root_pid`, cancellation requests `taskkill /T /F`, and detached recovery queries the Windows process tree through CIM before accepting quiescence. Legacy Windows Attempts that only persisted a parent PID fail closed instead of assuming that descendants exited with the parent.
+
+For a non-generative host/runtime check:
+
+```bash
+npm run smoke:platform
+```
+
+This verifies the host state-root convention, ServiceLease primitives, Git worktree allocation/landing, and a read-only Codex app-server catalog. On Windows it additionally verifies process-tree fencing. It does not send a model Task.
+
+Approval UI/clients must not assume one universal decision set. Read the Task status fields in this order: the frozen assignment `approval_contract`, the Attempt `native_approval_state`, then each pending interaction's `native_contract`. Different Harness profiles may expose different policies and response shapes even when they use the same underlying model. The current DSH Headless target is non-interactive/fail-closed; Codex app-server exposes native approval requests and request-specific response contracts.
+
+## Current implementation
+
+Current execution adapters include:
+
+```text
+src/execution/dsh-headless-adapter.js
+src/execution/dsh-acp-adapter.js
+src/execution/codex-app-server-adapter.js
+src/execution/harness-router.js
+```
+
+Real-model smoke scripts remain authorization-gated:
+
+```bash
+npm run smoke:codex-context  # model-selected aide_context tool use
+npm run smoke:codex-plan     # Plan-mode request_user_input/resume
+npm run smoke:codex-decomposition # real-proven: structured Plan outputSchema -> durable step postconditions -> Sol capability executor -> read-only reviewer
+npm run smoke:codex-semantic-review # real-proven: one read-only Sol structured review over fixed criteria/evidence
+npm run smoke:codex-reattach # regression: app-server loss interrupts active turn; live reattach is unsupported
+npm run smoke:crossfire      # two independent planners + capability executor
+```
+
+Each refuses to run unless `AIDE_ALLOW_MODEL_CALL=1` is explicitly set after authorization.

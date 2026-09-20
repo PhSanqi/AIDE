@@ -12,28 +12,72 @@
     <aside class="sidebar">
       <div class="brand-row">
         <div class="brand-mark">A</div>
-        <div>
+        <div class="brand-copy">
           <strong>AIDE</strong>
-          <small id="healthText">Connecting…</small>
+          <small>Agentic development engine</small>
         </div>
+        <span id="healthText" class="service-status" aria-live="polite">Connecting…</span>
       </div>
       <button class="primary full" id="newConversationButton">+ New conversation</button>
-      <nav class="nav-tabs" aria-label="Primary navigation">
-        <button class="nav-tab active" data-view="conversations">Conversations</button>
-        <button class="nav-tab" data-view="tasks">Tasks</button>
-        <button class="nav-tab" data-view="models">Models & Accounts</button>
-        <button class="nav-tab" data-view="harnesses">Harnesses & Modes</button>
-        <button class="nav-tab" data-view="routing">Routing</button>
-        <button class="nav-tab" data-view="settings">Settings</button>
-      </nav>
-      <div class="section-label">Recent</div>
-      <div id="conversationList" class="conversation-list"></div>
+      <div class="nav-section">
+        <div class="section-label">Workspace</div>
+        <nav class="nav-tabs" aria-label="Workspace navigation">
+          <button class="nav-tab" data-view="overview"><span>Overview</span><small>System snapshot</small></button>
+          <button class="nav-tab active" data-view="conversations"><span>Conversations</span><small>Plan and execute</small></button>
+          <button class="nav-tab" data-view="tasks"><span>Tasks</span><small>Work history</small></button>
+        </nav>
+      </div>
+      <div class="nav-section">
+        <div class="section-label">Runtime</div>
+        <nav class="nav-tabs" aria-label="Runtime navigation">
+          <button class="nav-tab" data-view="models"><span>Models & Accounts</span><small>Providers</small></button>
+          <button class="nav-tab" data-view="harnesses"><span>Harnesses & Modes</span><small>Execution profiles</small></button>
+          <button class="nav-tab" data-view="routing"><span>Routing</span><small>Decision history</small></button>
+          <button class="nav-tab" data-view="settings"><span>Settings</span><small>Local service</small></button>
+        </nav>
+      </div>
+      <div class="sidebar-recents">
+        <div class="section-label">Recent conversations</div>
+        <div id="conversationList" class="conversation-list"></div>
+      </div>
     </aside>
 
     <main class="main">
-      <section id="conversationView" class="view active">
+      <section id="overviewView" class="view">
         <header class="topbar">
-          <div>
+          <div class="page-heading">
+            <span class="eyebrow">Control center</span>
+            <h1>Overview</h1>
+            <p>Live project, provider, Harness, and recent execution status.</p>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost" id="overviewNewConversationButton">New conversation</button>
+            <button class="ghost" id="overviewRefreshButton">Refresh</button>
+          </div>
+        </header>
+        <div class="dashboard-page">
+          <div id="overviewStats" class="stats-grid"></div>
+          <div class="dashboard-grid">
+            <section class="surface-card">
+              <div class="surface-header"><div><span class="eyebrow">Runtime</span><h2>System readiness</h2></div></div>
+              <div id="overviewRuntime" class="overview-list"></div>
+            </section>
+            <section class="surface-card">
+              <div class="surface-header"><div><span class="eyebrow">Work</span><h2>Recent tasks</h2></div></div>
+              <div id="overviewRecentTasks" class="overview-list"></div>
+            </section>
+            <section class="surface-card span-2">
+              <div class="surface-header"><div><span class="eyebrow">Broker</span><h2>Recent routing</h2></div><button class="text-button" data-view-link="routing">Open history</button></div>
+              <div id="overviewRouting" class="overview-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section id="conversationsView" class="view active">
+        <header class="topbar">
+          <div class="page-heading">
+            <span class="eyebrow">Workspace</span>
             <h1 id="conversationTitle">New conversation</h1>
             <p id="conversationMeta">AIDE orchestration workspace</p>
           </div>
@@ -51,11 +95,20 @@
                 <span class="eyebrow">AIDE</span>
                 <h2>Start with the goal.</h2>
                 <p>AIDE will create a durable Task, choose a qualified Harness, execute, verify, and keep the result in this conversation.</p>
+                <div class="empty-flow" aria-label="AIDE task flow">
+                  <div><strong>1 · Define</strong><small>Describe the outcome.</small></div>
+                  <div><strong>2 · Route</strong><small>Broker qualifies the target.</small></div>
+                  <div><strong>3 · Verify</strong><small>Evidence closes the Task.</small></div>
+                </div>
               </div>
             </div>
+            <button id="jumpLatestButton" class="jump-latest" type="button" hidden>Jump to latest</button>
 
             <form id="composer" class="composer">
-              <textarea id="messageInput" rows="3" placeholder="Ask AIDE to work on this project…" required></textarea>
+              <div class="composer-input-wrap">
+                <textarea id="messageInput" rows="3" placeholder="Describe the engineering outcome you want…" required aria-label="Task objective"></textarea>
+                <span class="composer-shortcut">⌘/Ctrl + Enter to send</span>
+              </div>
               <div class="composer-toolbar">
                 <label>Strategy
                   <select id="strategySelect">
@@ -80,7 +133,7 @@
                     <option value="crossfire">Crossfire</option>
                   </select>
                 </label>
-                <button class="primary send" type="submit" id="sendButton">Send</button>
+                <button class="primary send" type="submit" id="sendButton">Send Task</button>
               </div>
               <div id="selectionHint" class="selection-hint"></div>
             </form>
@@ -97,12 +150,12 @@
       </section>
 
       <section id="tasksView" class="view">
-        <header class="topbar"><div><h1>Tasks</h1><p>Active, recent, and recovery-required work.</p></div></header>
+        <header class="topbar"><div class="page-heading"><span class="eyebrow">Work state</span><h1>Tasks</h1><p>Active, recent, and recovery-required work.</p></div></header>
         <div class="page-card"><div id="taskTable"></div></div>
       </section>
 
       <section id="modelsView" class="view">
-        <header class="topbar"><div><h1>Models & Accounts</h1><p>Live configured targets. Secrets are never returned to this page.</p></div></header>
+        <header class="topbar"><div class="page-heading"><span class="eyebrow">Providers</span><h1>Models & Accounts</h1><p>Live configured targets. Secrets are never returned to this page.</p></div></header>
         <div id="modelCards" class="card-grid"></div>
         <div class="page-card note-card">
           <h3>Account management boundary</h3>
@@ -111,17 +164,17 @@
       </section>
 
       <section id="routingView" class="view">
-        <header class="topbar"><div><h1>Routing</h1><p>Actual routing history and observe-only shadow advice.</p></div></header>
+        <header class="topbar"><div class="page-heading"><span class="eyebrow">Broker</span><h1>Routing</h1><p>Actual routing history and observe-only shadow advice.</p></div></header>
         <div class="page-card"><div id="routingTable"></div></div>
       </section>
 
       <section id="harnessesView" class="view">
-        <header class="topbar"><div><h1>Harnesses & Modes</h1><p>Native capabilities and configured execution profiles.</p></div></header>
+        <header class="topbar"><div class="page-heading"><span class="eyebrow">Execution</span><h1>Harnesses & Modes</h1><p>Native capabilities and configured execution profiles.</p></div></header>
         <div id="harnessCards" class="card-grid"></div>
       </section>
 
       <section id="settingsView" class="view">
-        <header class="topbar"><div><h1>Settings</h1><p>Current local service defaults and product boundaries.</p></div></header>
+        <header class="topbar"><div class="page-heading"><span class="eyebrow">Local service</span><h1>Settings</h1><p>Current local service defaults and product boundaries.</p></div></header>
         <div class="page-card" id="settingsCard"></div>
       </section>
     </main>

@@ -28,6 +28,16 @@ test("Tutti acceptance rejects evidence that does not satisfy the task", () => {
   assert.equal(acceptance.accepted, false);
 });
 
+test("Tutti acceptance treats CRLF and LF as equivalent text while evidence hashes remain byte-exact", () => {
+  const accepted = evaluateAcceptance({
+    result: { status: "completed", final_text: "ok" },
+    evidence: { files: [{ path: "RESULT.txt", text: "line 1\r\nline 2\r\n", sha256: "raw-byte-hash" }] },
+    criteria: { finalText: "ok", files: { "RESULT.txt": "line 1\nline 2\n" } },
+  });
+  assert.equal(accepted.accepted, true);
+  assert.equal(accepted.checks.find((check) => check.name === "file:RESULT.txt:text")?.passed, true);
+});
+
 test("workspace evidence rejects lexical path escape", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "aide-evidence-path-test-"));
   await assert.rejects(() => collectFileEvidence({ cwd, paths: ["../outside.txt"] }), { code: "EVIDENCE_PATH_OUTSIDE_WORKSPACE" });

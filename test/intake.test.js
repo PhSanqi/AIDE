@@ -27,6 +27,57 @@ test("TuttiIntake creates work, prepares shared context, and automatically selec
   assert.deepEqual(submitted.recommendation.rejected, [{ id: "unavailable", reasons: ["unavailable"] }]);
 });
 
+test("TuttiIntake preflight proves routing and workspace intent without creating durable work", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aide-intake-preflight-test-"));
+  const store = await WorkStateStore.open({ filePath: join(root, ".aide-state.json") });
+  const context = await LocalContextFabric.open({ root, store });
+  const router = { probe: async () => ({ dsh: { available: true, capabilities: ["headless"] } }) };
+  const intake = new TuttiIntake({ store, router, context });
+  const before = store.listTaskViews().length;
+
+  const preflight = await intake.preflight("prove before executing", {
+    workspace: root,
+    constraints: ["Keep the current public API."],
+    requirements: { preferred_targets: ["dsh"], capabilities: ["headless"] },
+  });
+
+  assert.equal(preflight.dry_run, true);
+  assert.equal(preflight.workflow, "direct");
+  assert.equal(preflight.assignment.id, "dsh");
+  assert.equal(preflight.workspace.path, root);
+  assert.equal(preflight.durable_state_created, false);
+  assert.equal(preflight.native_run_started, false);
+  assert.equal(store.listTaskViews().length, before);
+});
+
+test("TuttiIntake preflight uses the same direct-model and isolation gates as submission", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aide-intake-preflight-gates-test-"));
+  const store = await WorkStateStore.open({ filePath: join(root, ".aide-state.json") });
+  const context = await LocalContextFabric.open({ root, store });
+  const router = {
+    probe: async () => ({
+      "codex-capability": {
+        available: true,
+        provider: "codex",
+        model_directory: [{ id: "gpt-small", model: "gpt-small", default_reasoning_effort: "medium", reasoning_efforts: ["medium"], multi_agent_version: "v1" }],
+      },
+    }),
+  };
+  const intake = new TuttiIntake({ store, router, context });
+
+  await assert.rejects(
+    intake.preflight("invalid mixed mode", {
+      requirements: { execution_strategy: "capability", preferred_targets: ["codex-capability"], requested_model: "gpt-small", semantic_decomposition: "plan" },
+    }),
+    /only supported for direct execution/,
+  );
+  await assert.rejects(
+    intake.preflight("isolated run", { workspace: root, requirements: { preferred_targets: ["codex-capability"], workspace_isolation: "attempt" } }),
+    (error) => error.code === "WORKSPACE_ISOLATION_PATH_FORBIDDEN",
+  );
+  assert.equal(store.listTaskViews().length, 0);
+});
+
 test("TuttiIntake never uses alphabetical candidate order as an implicit assignment policy", async () => {
   const root = await mkdtemp(join(tmpdir(), "aide-intake-assignment-test-"));
   const store = await WorkStateStore.open({ filePath: join(root, ".aide-state.json") });
@@ -1795,13 +1846,13 @@ test("TuttiIntake recovery verifies a persisted same-host native PID before acce
     status: () => { throw Object.assign(new Error("missing"), { code: "HARNESS_RUN_NOT_FOUND" }); },
   };
 
-  const alive = new TuttiIntake({ store, router, context, hostName: "test-host", processAlive: () => true });
+  const alive = new TuttiIntake({ store, router, context, hostName: "test-host", platform: "linux", processAlive: () => true });
   await assert.rejects(
     alive.recoverTask(submission.task.task_id, { action: "abandon", quiescent: true }),
     (error) => error.code === "RECOVERY_PROCESS_STILL_ALIVE" && error.pid === 4242,
   );
 
-  const exited = new TuttiIntake({ store, router, context, hostName: "test-host", processAlive: () => false });
+  const exited = new TuttiIntake({ store, router, context, hostName: "test-host", platform: "linux", processAlive: () => false });
   const recovered = await exited.recoverTask(submission.task.task_id, { action: "abandon" });
   assert.equal(recovered.recovery.status, "abandoned");
   assert.equal(recovered.result.recovery.quiescence.source, "local_pid_exit");
@@ -1820,13 +1871,13 @@ test("TuttiIntake recovery prefers persisted process-group ownership over primar
     status: () => { throw Object.assign(new Error("missing"), { code: "HARNESS_RUN_NOT_FOUND" }); },
   };
 
-  const alive = new TuttiIntake({ store, router, context, hostName: "test-host", processAlive: () => false, processGroupAlive: () => true });
+  const alive = new TuttiIntake({ store, router, context, hostName: "test-host", platform: "linux", processAlive: () => false, processGroupAlive: () => true });
   await assert.rejects(
     alive.recoverTask(submission.task.task_id, { action: "abandon", quiescent: true }),
     (error) => error.code === "RECOVERY_PROCESS_GROUP_STILL_ALIVE" && error.process_group_id === 5252,
   );
 
-  const exited = new TuttiIntake({ store, router, context, hostName: "test-host", processAlive: () => true, processGroupAlive: () => false });
+  const exited = new TuttiIntake({ store, router, context, hostName: "test-host", platform: "linux", processAlive: () => true, processGroupAlive: () => false });
   const recovered = await exited.recoverTask(submission.task.task_id, { action: "abandon" });
   assert.equal(recovered.result.recovery.quiescence.source, "local_process_group_exit");
   assert.equal(recovered.result.recovery.quiescence.process_group_id, 5252);
@@ -1934,7 +1985,7 @@ test("TuttiIntake lands an accepted isolated Attempt before closing the Task", a
 
   assert.equal(completed.workspace_ref.mode, "isolated");
   assert.equal(store.getWorkspace(completed.workspace_ref.workspace_ref_id).landing_status, "landed");
-  assert.equal(await (await import("node:fs/promises")).readFile(join(root, "RESULT.txt"), "utf8"), "landed\n");
+  assert.equal((await (await import("node:fs/promises")).readFile(join(root, "RESULT.txt"), "utf8")).replace(/\r\n/g, "\n"), "landed\n");
   assert.equal(completed.verification.accepted, true);
   assert.equal(completed.closure.task.status, "completed");
   assert.ok(completed.evidence.landing.patch_bytes > 0);

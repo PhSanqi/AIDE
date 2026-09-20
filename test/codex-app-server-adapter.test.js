@@ -4,7 +4,7 @@ import { PassThrough, Writable } from "node:stream";
 import test from "node:test";
 import { CodexAppServerAdapter } from "../src/execution/codex-app-server-adapter.js";
 
-function fakeCodexProcess({ interaction = null, dynamicToolCall = null, itemStarted = null, completeOn = null, terminalItems = null, threadReadItems = null, tokenUsage = null, resumeStatus = null, modelReroute = null, account = { type: "chatgpt", email: "user@example.com", planType: "pro" } } = {}) {
+function fakeCodexProcess({ interaction = null, dynamicToolCall = null, itemStarted = null, itemCompleted = null, completeOn = null, terminalItems = null, threadReadItems = null, tokenUsage = null, resumeStatus = null, modelReroute = null, account = { type: "chatgpt", email: "user@example.com", planType: "pro" } } = {}) {
   const child = new EventEmitter();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
@@ -93,6 +93,7 @@ function fakeCodexProcess({ interaction = null, dynamicToolCall = null, itemStar
       if (tokenUsage) emit({ method: "thread/tokenUsage/updated", params: { threadId: "thread-1", turnId: "turn-1", tokenUsage } });
       if (modelReroute) emit({ method: "model/rerouted", params: { threadId: "thread-1", turnId: "turn-1", ...modelReroute } });
       if (itemStarted) emit({ method: "item/started", params: { threadId: "thread-1", turnId: "turn-1", startedAtMs: Date.now(), item: itemStarted } });
+      if (itemCompleted) emit({ method: "item/completed", params: { threadId: "thread-1", turnId: "turn-1", item: itemCompleted } });
       if (interaction) emit({ id: "server-1", method: interaction.method, params: interaction.params });
       if (dynamicToolCall) emit({ id: "tool-server-1", method: "item/tool/call", params: dynamicToolCall });
       if (completeOn === "start") complete();
@@ -254,9 +255,10 @@ test("CodexAppServerAdapter only classifies file changes inside cwd as workspace
   await outsideHandle.done;
 });
 
-test("CodexAppServerAdapter classifies started native items conservatively", async () => {
+test("CodexAppServerAdapter classifies completed native commands conservatively", async () => {
   const fake = fakeCodexProcess({
     itemStarted: { type: "commandExecution", id: "command-1", command: "curl https://example.com" },
+    itemCompleted: { type: "commandExecution", id: "command-1", command: "curl https://example.com", status: "completed", commandActions: [{ type: "unknown", command: "curl https://example.com" }], exitCode: 0, durationMs: 10, aggregatedOutput: "" },
   });
   const events = [];
   const adapter = new CodexAppServerAdapter({ spawn: () => fake.child, exec: async () => ({ stdout: "codex 1" }) });
@@ -264,9 +266,40 @@ test("CodexAppServerAdapter classifies started native items conservatively", asy
   const effect = await waitFor(() => events.find((event) => event.type === "side_effect"));
   assert.equal(effect.classification, "external_possible");
   assert.equal(effect.source, "codex:item/commandExecution");
-  assert.deepEqual(effect.detail, { item_id: "command-1" });
+  assert.deepEqual(effect.detail, { item_id: "command-1", command_actions: ["unknown"] });
   handle.cancel();
   await handle.done;
+});
+
+test("CodexAppServerAdapter uses completed command evidence to avoid false external side effects", async () => {
+  for (const [item, expected] of [
+    [{
+      type: "commandExecution", id: "read-1", command: "cat README.md", status: "completed",
+      commandActions: [{ type: "read", command: "cat README.md", name: "README.md", path: "/tmp/work/README.md" }],
+      exitCode: 0, durationMs: 2, aggregatedOutput: "ok",
+    }, "none"],
+    [{
+      type: "commandExecution", id: "inspect-1",
+      command: "/bin/bash -lc \"git status --short && printf '%s' '---CONTENT---' && od -An -t x1 RESULT.txt && printf '%s' '---TEXT---' && sed -n l RESULT.txt\"",
+      status: "completed",
+      commandActions: [{ type: "unknown", command: "git status --short && printf '%s' '---CONTENT---' && od -An -t x1 RESULT.txt && printf '%s' '---TEXT---' && sed -n l RESULT.txt" }],
+      exitCode: 0, durationMs: 5, aggregatedOutput: "",
+    }, "workspace_only"],
+    [{
+      type: "commandExecution", id: "sandbox-1", command: "touch RESULT.txt", status: "failed",
+      commandActions: [{ type: "unknown", command: "touch RESULT.txt" }],
+      exitCode: 1, durationMs: 0, aggregatedOutput: "bwrap: No permissions to create new namespace, likely because the kernel does not allow non-privileged user namespaces.\n",
+    }, "none"],
+  ]) {
+    const fake = fakeCodexProcess({ itemStarted: { ...item, status: "inProgress" }, itemCompleted: item });
+    const events = [];
+    const adapter = new CodexAppServerAdapter({ spawn: () => fake.child, exec: async () => ({ stdout: "codex 1" }) });
+    const handle = adapter.start({ task: "classify", cwd: "/tmp/work", onEvent: (event) => events.push(event) });
+    const effect = await waitFor(() => events.find((event) => event.type === "side_effect"));
+    assert.equal(effect.classification, expected);
+    handle.cancel();
+    await handle.done;
+  }
 });
 
 test("CodexAppServerAdapter sends turn/steer against the active thread and turn", async () => {
@@ -476,7 +509,7 @@ test("CodexAppServerAdapter applies one frozen per-run model/effort without chan
 });
 
 test("CodexAppServerAdapter uses the Windows cmd shim and persists a process-tree root", async () => {
-  const fake = fakeCodexProcess();
+  const fake = fakeCodexProcess({ completeOn: "start" });
   let launch;
   const adapter = new CodexAppServerAdapter({
     platform: "win32",
@@ -485,15 +518,13 @@ test("CodexAppServerAdapter uses the Windows cmd shim and persists a process-tre
     exec: async () => ({ stdout: "codex test" }),
   });
   const handle = adapter.start({ task: "windows launch", cwd: "C:\\work" });
-  await waitFor(() => fake.messages.some((message) => message.method === "turn/start"));
+  const result = await handle.done;
+  assert.equal(result.status, "completed");
   assert.equal(launch.command.toLowerCase().endsWith("cmd.exe"), true);
   assert.deepEqual(launch.args.slice(0, 6), ["/d", "/s", "/c", "codex.cmd", "app-server", "--stdio"]);
   assert.equal(launch.options.windowsHide, true);
   assert.equal(handle.process_group_id, null);
   assert.equal(handle.process_tree_root_pid, fake.child.pid);
-  fake.child.exitCode = 1;
-  fake.child.emit("close", 1, null);
-  assert.equal((await handle.done).status, "failed");
 });
 
 test("CodexAppServerAdapter maps the verified Plan collaboration target onto turn/start", async () => {

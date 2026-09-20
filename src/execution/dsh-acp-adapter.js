@@ -74,8 +74,8 @@ function classifyToolCall(update, cwd, permissionMode) {
   return isWithinWorkspace(cwd, input.file_path) ? "workspace_only" : "external_possible";
 }
 
-function killOwnedProcess(child, signal, ownsProcessGroup, platform = process.platform) {
-  if (platform === "win32" && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
+function killOwnedProcess(child, signal, ownsProcessGroup, ownsProcessTree, platform = process.platform) {
+  if (ownsProcessTree && Number.isInteger(child.pid) && child.pid > 0) return terminateProcessTree(child.pid, { platform });
   if (ownsProcessGroup && Number.isInteger(child.pid) && child.pid > 0) {
     try { process.kill(-child.pid, signal); return true; }
     catch (error) { if (error?.code !== "ESRCH") throw error; }
@@ -131,6 +131,7 @@ export class DshAcpAdapter {
 
     const platform = this.platform;
     const ownsProcessGroup = platform !== "win32" && this.spawn === spawnProcess;
+    const ownsProcessTree = platform === "win32" && this.spawn === spawnProcess;
     const launch = nativeCommandSpec(this.command, ["--profile", "acp"], { platform });
     const child = this.spawn(launch.command, launch.args, {
       cwd,
@@ -273,7 +274,7 @@ export class DshAcpAdapter {
     const failProtocol = (error) => {
       protocolError ??= { code: error?.code ?? "DSH_ACP_PROTOCOL_ERROR", message: error?.message ?? "DSH ACP protocol failed." };
       try { child.stdin.end(); } catch { /* process close will settle the run */ }
-      if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGTERM", ownsProcessGroup, platform);
+      if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGTERM", ownsProcessGroup, ownsProcessTree, platform);
     };
 
     const setup = (async () => {
@@ -355,12 +356,12 @@ export class DshAcpAdapter {
           try { notify("session/cancel", { sessionId: observedSessionId }); }
           catch { return false; }
           killTimer ??= setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGTERM", ownsProcessGroup, platform);
+            if (child.exitCode === null && child.signalCode === null) killOwnedProcess(child, "SIGTERM", ownsProcessGroup, ownsProcessTree, platform);
           }, 2_000);
           killTimer.unref?.();
           return true;
         }
-        return killOwnedProcess(child, "SIGTERM", ownsProcessGroup, platform);
+        return killOwnedProcess(child, "SIGTERM", ownsProcessGroup, ownsProcessTree, platform);
       },
       async respond({ nativeRequestRef, response } = {}) {
         const pendingPermission = permissions.get(nativeRequestRef);
